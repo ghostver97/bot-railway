@@ -21,7 +21,7 @@ app.get('/', (req, res) => {
             <html>
             <head>
                 <title>QR Bot WhatsApp</title>
-                <meta http-equiv="refresh" content="10">
+                <meta http-equiv="refresh" content="5">
                 <style>
                     body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; background: #f4f4f9; margin: 0; }
                     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); text-align: center; }
@@ -38,13 +38,17 @@ app.get('/', (req, res) => {
             </html>
         `);
     } else {
-        res.status(200).send('OK - Bot Activo 24/7');
+        res.status(200).send('OK - Bot Activo 24/7 y Operando');
     }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor HTTP corriendo en el puerto ${PORT}`);
+// Mantener el servidor HTTP vivo a toda costa
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor HTTP activo en el puerto ${PORT}`);
 });
+
+server.keepAliveTimeout = 61000;
+server.headersTimeout = 65000;
 
 if (!fs.existsSync('./datos')) {
     fs.mkdirSync('./datos');
@@ -77,7 +81,8 @@ async function startBot() {
             version,
             logger: pino({ level: 'silent' }),
             auth: state,
-            printQRInTerminal: false
+            printQRInTerminal: false,
+            browser: ["Ubuntu", "Chrome", "20.0.04"]
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -90,10 +95,15 @@ async function startBot() {
             }
 
             if (connection === 'close') {
-                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                
+                console.log(`⚠️ Conexión cerrada. Código: ${statusCode}. Reconectando: ${shouldReconnect}`);
+                
                 if (shouldReconnect) {
                     setTimeout(() => startBot(), 3000);
                 } else {
+                    qrImage = '';
                     try { fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true }); } catch(e){}
                     setTimeout(() => startBot(), 3000);
                 }
@@ -162,7 +172,7 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Envío directo plano sin bloqueos de metadatos
+                // Envío directo al chat actual (grupo o privado) para garantizar entrega inmediata
                 await sock.sendMessage(from, { 
                     text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                 });
@@ -173,7 +183,7 @@ async function startBot() {
                 if (mentioned && !isNaN(monto)) {
                     db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
                     saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ $${monto} agregados al usuario correctamente.` });
+                    await sock.sendMessage(from, { text: `✅ Saldo actualizado correctamente.` });
                 }
             }
             else if (command === 'addstock' && await isAdmin()) {
@@ -203,3 +213,6 @@ async function startBot() {
 }
 
 startBot();
+
+process.on('uncaughtException', () => {});
+process.on('unhandledRejection', () => {});

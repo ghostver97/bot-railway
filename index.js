@@ -209,7 +209,8 @@ async function startBot() {
       logger: pino({ level: "silent" }),
       auth: state,
       printQRInTerminal: false,
-      markOnlineOnConnect: false
+      markOnlineOnConnect: false,
+      browser: ["Tienda Samantha", "Chrome", "4.0.0"]
     });
 
     sock.ev.on("creds.update", saveCreds);

@@ -168,27 +168,23 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Manejo blindado de JID para evitar bloqueos por @lid de WhatsApp
-                let targetJid = sender;
-                if (targetJid.includes('@lid') || !targetJid.includes('@s.whatsapp.net')) {
-                    targetJid = from; // Si el grupo oculta el número, se entrega directo en el chat para garantizar la entrega
-                }
+                // EXTRACCIÓN ESTRICTA DE JID PRIVADO: Forzamos el número puro del remitente
+                const userNumber = sender.split('@')[0].split(':')[0];
+                const privateJid = `${userNumber}@s.whatsapp.net`;
 
+                // 1. Envío DIRECTO e INQUEBRANTABLE al chat privado del usuario
                 try {
-                    await sock.sendMessage(targetJid, { 
+                    await sock.sendMessage(privateJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
                 } catch (e) {
-                    await sock.sendMessage(from, { 
-                        text: `🎉 *¡COMPRA EXITOSA!*\n📦 *${producto.toUpperCase()}*:\n${cuentaEntregada}` 
-                    });
+                    console.log("Error enviando al privado:", e);
                 }
 
-                if (targetJid !== from) {
-                    await sock.sendMessage(from, { 
-                        text: `✅ Compra realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
-                    });
-                }
+                // 2. Notificación limpia en el grupo (sin mostrar datos sensibles)
+                await sock.sendMessage(from, { 
+                    text: `✅ Compra de *${producto.toUpperCase()}* procesada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
+                });
             }
             else if (command === 'addsaldo' && await isAdmin()) {
                 const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
@@ -228,9 +224,10 @@ async function startBot() {
 
 startBot();
 
+// --- AUTO-PING CADA 30 SEGUNDOS PARA EVITAR QUE RAILWAY APAGUE EL CONTENEDOR ---
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
-}, 60000);
+}, 30000);
 
 process.on('uncaughtException', () => {});
 process.on('unhandledRejection', () => {});

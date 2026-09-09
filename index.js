@@ -12,7 +12,7 @@ const QRCode = require('qrcode');
 // Variable global para guardar la imagen del QR
 let qrImage = '';
 
-// --- SERVIDOR EXPRESS ---
+// --- SERVIDOR EXPRESS (Mantiene el contenedor activo 24/7) ---
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -50,7 +50,7 @@ app.get('/', (req, res) => {
     }
 });
 
-app.listen(PORT, () => console.log(`Servidor activo en el puerto ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor web activo en el puerto ${PORT}`));
 
 // --- BASE DE DATOS LOCAL Y SESIÓN (Carpeta datos) ---
 if (!fs.existsSync('./datos')) {
@@ -177,7 +177,7 @@ async function startBot() {
             const cuentaEntregada = db.stock[producto].shift();
             saveDB(db);
 
-            // Corrección aplicada aquí para asegurar el envío del mensaje privado (evita el error 463)
+            // Envío seguro al chat privado (evita error 463 de WhatsApp)
             const cleanSender = sender.includes('@') ? sender.split('@')[0] + '@s.whatsapp.net' : sender;
             await sock.sendMessage(cleanSender, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
             

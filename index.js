@@ -19,7 +19,7 @@ const PORT = Number(process.env.PORT || 8080);
 // Si no existe DATA_DIR, usa ./datos.
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "datos");
 const DB_FILE = path.join(DATA_DIR, "db.json");
-const MENU_IMAGE = path.join(process.cwd(), "menu.png");
+const MENU_IMAGE = path.join(process.cwd(), "menu.jpg");
 const AUTH_DIR = path.join(DATA_DIR, "auth_info_baileys");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -229,10 +229,11 @@ async function handleCommand(m) {
 
   if (command === "pagos" || command === "metodos") {
     const text = paymentsText(db);
+    const pagosImagePath = path.join(process.cwd(), "pagos.png");
 
-    if (fs.existsSync(path.join(process.cwd(), "pagos.png"))) {
+    if (fs.existsSync(pagosImagePath)) {
       await sock.sendMessage(sender.remote, {
-        image: fs.readFileSync(path.join(process.cwd(), "pagos.png")),
+        image: fs.readFileSync(pagosImagePath),
         caption: text
       });
     } else {
@@ -492,8 +493,8 @@ Gracias por tu compra.`
 .addsaldo NUMERO CANTIDAD
 .addsaldo CANTIDAD (mencionando al usuario)
 
-.addstock producto cuenta
-.setprecio producto precio
+.addstock netflix cuenta
+.setprecio netflix precio
 
 .addpago transferencia datos
 .addpago oxxo datos

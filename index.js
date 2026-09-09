@@ -127,9 +127,10 @@ async function startBot() {
             const from = m.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
             
-            // Identificación limpia y directa del usuario
-            const sender = isGroup ? (m.key.participant || m.participant || from) : from;
-            const userJid = sender.includes('@') ? sender : `${sender}@s.whatsapp.net`;
+            // --- UNIFICACIÓN ESTRICTA DE JID (Evita desajustes de saldo) ---
+            const rawSender = isGroup ? (m.key.participant || m.participant || from) : from;
+            const cleanNum = rawSender.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+            const userJid = `${cleanNum}@s.whatsapp.net`;
 
             const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
             if (!body.startsWith('.')) return;
@@ -142,7 +143,7 @@ async function startBot() {
                 if (!isGroup) return false;
                 try {
                     const metadata = await sock.groupMetadata(from);
-                    const p = metadata.participants.find(item => item.id === userJid);
+                    const p = metadata.participants.find(item => item.id.includes(cleanNum));
                     return p && (p.admin === 'admin' || p.admin === 'superadmin');
                 } catch (e) {
                     return false;
@@ -178,6 +179,7 @@ async function startBot() {
                 if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` });
                 if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` });
                 
+                // Descontar saldo usando la misma clave unificada
                 db.saldos[userJid] -= precio;
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
@@ -191,18 +193,23 @@ async function startBot() {
                     console.log("Error enviando al privado:", e);
                 }
 
-                // Aviso en el grupo
+                // Aviso limpio en el grupo
                 await sock.sendMessage(from, { 
                     text: `✅ Compra de *${producto.toUpperCase()}* procesada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
                 });
             }
             else if (command === 'addsaldo' && await isAdmin()) {
-                const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || userJid;
+                let targetJid = userJid;
+                const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                if (mentioned) {
+                    const mentionNum = mentioned.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+                    targetJid = `${mentionNum}@s.whatsapp.net`;
+                }
                 const monto = parseInt(args[1] || args[0]);
                 if (!isNaN(monto)) {
-                    db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
+                    db.saldos[targetJid] = (db.saldos[targetJid] || 0) + monto;
                     saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ $${monto} agregados correctamente.` });
+                    await sock.sendMessage(from, { text: `✅ $${monto} agregados correctamente al saldo del usuario.` });
                 }
             }
             else if (command === 'addstock' && await isAdmin()) {
@@ -234,7 +241,7 @@ async function startBot() {
 
 startBot();
 
-// Auto-ping rápido para mantener el contenedor despierto
+// Auto-ping estricto para mantener Railway despierto
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
 }, 20000);

@@ -2,8 +2,7 @@ const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore
+  fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys");
 
 const express = require("express");
@@ -26,7 +25,6 @@ try {
 
 let qrImage = "";
 let sock = null;
-let starting = false;
 
 function defaultDB() {
   return {
@@ -47,9 +45,8 @@ function loadDB() {
       saveDB(db);
       return db;
     }
-
     const raw = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
-    const db = {
+    return {
       ...defaultDB(),
       ...raw,
       saldos: raw.saldos || {},
@@ -57,7 +54,6 @@ function loadDB() {
       precios: raw.precios || {},
       pagos: { ...defaultDB().pagos, ...(raw.pagos || {}) }
     };
-    return db;
   } catch (e) {
     return defaultDB();
   }
@@ -72,10 +68,7 @@ function saveDB(db) {
 }
 
 function normalizeNumber(value) {
-  return String(value || "")
-    .split("@")[0]
-    .split(":")[0]
-    .replace(/\D/g, "");
+  return String(value || "").split("@")[0].split(":")[0].replace(/\D/g, "");
 }
 
 function jidFromNumber(number) {
@@ -86,24 +79,13 @@ function jidFromNumber(number) {
 function getSender(m) {
   const remote = m.key.remoteJid || "";
   const isGroup = remote.endsWith("@g.us");
-  const raw = isGroup
-    ? (m.key.participant || m.participant || "")
-    : remote;
-
+  const raw = isGroup ? (m.key.participant || m.participant || "") : remote;
   const number = normalizeNumber(raw);
-  return {
-    remote,
-    isGroup,
-    number,
-    jid: jidFromNumber(number)
-  };
+  return { remote, isGroup, number, jid: jidFromNumber(number) };
 }
 
 function getAdminNumbers() {
-  return (process.env.ADMIN_NUMBERS || "")
-    .split(",")
-    .map(normalizeNumber)
-    .filter(Boolean);
+  return (process.env.ADMIN_NUMBERS || "").split(",").map(normalizeNumber).filter(Boolean);
 }
 
 function isConfiguredAdmin(number) {
@@ -114,13 +96,8 @@ async function isGroupAdmin(groupJid, number) {
   try {
     const metadata = await sock.groupMetadata(groupJid);
     const wanted = normalizeNumber(number);
-
-    const participant = metadata.participants.find(
-      p => normalizeNumber(p.id) === wanted
-    );
-
-    return !!participant &&
-      (participant.admin === "admin" || participant.admin === "superadmin");
+    const participant = metadata.participants.find(p => normalizeNumber(p.id) === wanted);
+    return !!participant && (participant.admin === "admin" || participant.admin === "superadmin");
   } catch (e) {
     return false;
   }
@@ -139,15 +116,7 @@ async function sendText(to, text) {
 
 function menuText(db, sender) {
   const products = Object.keys(db.precios);
-
-  let text =
-`🛒 *TIENDA SAMANTHA*
-
-💰 Saldo: *$${db.saldos[sender.jid] || 0} MXN*
-
-📦 *PRODUCTOS*
-`;
-
+  let text = `🛒 *TIENDA SAMANTHA*\n\n💰 Saldo: *$${db.saldos[sender.jid] || 0} MXN*\n\n📦 *PRODUCTOS*\n`;
   if (!products.length) {
     text += "\n_No hay productos configurados._\n";
   } else {
@@ -156,46 +125,20 @@ function menuText(db, sender) {
       text += `\n• *${product.toUpperCase()}* — $${db.precios[product]} MXN — Stock: ${stock}`;
     }
   }
-
-  text +=
-`
-
-📋 *COMANDOS*
-.menu — Ver tienda
-.saldo — Ver saldo
-.pagos — Ver métodos de pago
-.comprar producto — Comprar
-.stock — Ver inventario
-`;
-
+  text += `\n\n📋 *COMANDOS*\n.menu — Ver tienda\n.saldo — Ver saldo\n.pagos — Ver métodos de pago\n.comprar producto — Comprar\n.stock — Ver inventario\n`;
   return text;
 }
 
 function paymentsText(db) {
-  return `💳 *MÉTODOS DE PAGO*
-
-🏦 *TRANSFERENCIA*
-${db.pagos.transferencia || "No configurado"}
-
-🏪 *OXXO*
-${db.pagos.oxxo || "No configurado"}
-
-📩 Después de pagar, envía tu comprobante al administrador.`;
+  return `💳 *MÉTODOS DE PAGO*\n\n🏦 *TRANSFERENCIA*\n${db.pagos.transferencia || "No configurado"}\n\n🏪 *OXXO*\n${db.pagos.oxxo || "No configurado"}\n\n📩 Después de pagar, envía tu comprobante al administrador.`;
 }
 
 async function handleCommand(m) {
   if (!m.message || m.key.fromMe) return;
-
   const sender = getSender(m);
   if (!sender.number || !sender.jid) return;
 
-  const body =
-    m.message.conversation ||
-    m.message.extendedTextMessage?.text ||
-    m.message.imageMessage?.caption ||
-    m.message.videoMessage?.caption ||
-    "";
-
+  const body = m.message.conversation || m.message.extendedTextMessage?.text || m.message.imageMessage?.caption || "";
   if (!body.trim().startsWith(".")) return;
 
   const parts = body.trim().slice(1).split(/\s+/);
@@ -205,12 +148,8 @@ async function handleCommand(m) {
 
   if (command === "menu" || command === "tienda") {
     const text = menuText(db, sender);
-
     if (fs.existsSync(MENU_IMAGE)) {
-      await sock.sendMessage(sender.remote, {
-        image: fs.readFileSync(MENU_IMAGE),
-        caption: text
-      });
+      await sock.sendMessage(sender.remote, { image: fs.readFileSync(MENU_IMAGE), caption: text });
     } else {
       await sendText(sender.remote, text);
     }
@@ -218,22 +157,15 @@ async function handleCommand(m) {
   }
 
   if (command === "saldo") {
-    await sendText(
-      sender.remote,
-      `💰 Tu saldo actual es: *$${db.saldos[sender.jid] || 0} MXN*`
-    );
+    await sendText(sender.remote, `💰 Tu saldo actual es: *$${db.saldos[sender.jid] || 0} MXN*`);
     return;
   }
 
   if (command === "pagos" || command === "metodos") {
     const text = paymentsText(db);
     const pagosImagePath = path.join(process.cwd(), "pagos.png");
-
     if (fs.existsSync(pagosImagePath)) {
-      await sock.sendMessage(sender.remote, {
-        image: fs.readFileSync(pagosImagePath),
-        caption: text
-      });
+      await sock.sendMessage(sender.remote, { image: fs.readFileSync(pagosImagePath), caption: text });
     } else {
       await sendText(sender.remote, text);
     }
@@ -252,12 +184,10 @@ async function handleCommand(m) {
 
   if (command === "comprar") {
     const product = String(args[0] || "").toLowerCase();
-
     if (!product || db.precios[product] == null) {
       await sendText(sender.remote, "❌ Producto no válido. Usa *.menu* para ver la tienda.");
       return;
     }
-
     const price = Number(db.precios[product]);
     const stock = Array.isArray(db.stock[product]) ? db.stock[product] : [];
     const balance = Number(db.saldos[sender.jid] || 0);
@@ -266,37 +196,16 @@ async function handleCommand(m) {
       await sendText(sender.remote, "❌ Ese producto está agotado.");
       return;
     }
-
     if (balance < price) {
-      await sendText(
-        sender.remote,
-        `❌ Saldo insuficiente.\n\nPrecio: $${price} MXN\nTu saldo: $${balance} MXN`
-      );
+      await sendText(sender.remote, `❌ Saldo insuficiente.\n\nPrecio: $${price} MXN\nTu saldo: $${balance} MXN`);
       return;
     }
 
     const account = stock[0];
-
     try {
-      await sendText(
-        sender.jid,
-`🎉 *¡COMPRA EXITOSA!*
-
-📦 Producto: *${product.toUpperCase()}*
-💵 Precio: *$${price} MXN*
-
-🔐 *TUS DATOS*
-${account}
-
-💰 Saldo restante: *$${balance - price} MXN*
-
-Gracias por tu compra.`
-      );
+      await sendText(sender.jid, `🎉 *¡COMPRA EXITOSA!*\n\n📦 Producto: *${product.toUpperCase()}*\n💵 Precio: *$${price} MXN*\n\n🔐 *TUS DATOS*\n${account}\n\n💰 Saldo restante: *$${balance - price} MXN*\n\nGracias por tu compra.`);
     } catch (deliveryError) {
-      await sendText(
-        sender.remote,
-        "⚠️ La compra no pudo entregarse por privado. No se descontó tu saldo. Intenta nuevamente o contacta al administrador."
-      );
+      await sendText(sender.remote, "⚠️ La compra no pudo entregarse por privado. No se descontó tu saldo.");
       return;
     }
 
@@ -305,258 +214,111 @@ Gracias por tu compra.`
     saveDB(db);
 
     if (sender.isGroup) {
-      await sendText(
-        sender.remote,
-        `✅ Compra de *${product.toUpperCase()}* realizada.\n🔐 Revisa tu chat privado.`
-      );
+      await sendText(sender.remote, `✅ Compra de *${product.toUpperCase()}* realizada.\n🔐 Revisa tu chat privado.`);
     }
     return;
   }
 
   if (command === "addsaldo") {
-    if (!(await canAdmin(sender))) {
-      await sendText(sender.remote, "❌ Solo un administrador puede usar este comando.");
-      return;
-    }
-
+    if (!(await canAdmin(sender))) return sendText(sender.remote, "❌ Solo un administrador.");
     const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
     const targetJid = mentioned || jidFromNumber(args[0]);
     const amount = Number(args[mentioned ? 0 : 1]);
-
-    if (!targetJid || !Number.isFinite(amount) || amount <= 0) {
-      await sendText(
-        sender.remote,
-        "Uso:\n.addsaldo NUMERO CANTIDAD\n\nO menciona al usuario y usa:\n.addsaldo CANTIDAD"
-      );
-      return;
-    }
-
+    if (!targetJid || !Number.isFinite(amount) || amount <= 0) return sendText(sender.remote, "Uso: .addsaldo NUMERO CANTIDAD");
     db.saldos[targetJid] = Number(db.saldos[targetJid] || 0) + amount;
     saveDB(db);
-
-    await sendText(
-      sender.remote,
-      `✅ Saldo agregado: *$${amount} MXN*\n💰 Nuevo saldo: *$${db.saldos[targetJid]} MXN*`
-    );
+    await sendText(sender.remote, `✅ Saldo agregado: *$${amount} MXN*`);
     return;
   }
 
   if (command === "addstock") {
-    if (!(await canAdmin(sender))) {
-      await sendText(sender.remote, "❌ Solo un administrador puede usar este comando.");
-      return;
-    }
-
+    if (!(await canAdmin(sender))) return sendText(sender.remote, "❌ Solo un administrador.");
     const product = String(args.shift() || "").toLowerCase();
     const account = args.join(" ").trim();
-
-    if (!product || !account) {
-      await sendText(
-        sender.remote,
-        "Uso:\n.addstock netflix correo@ejemplo.com:contraseña"
-      );
-      return;
-    }
-
+    if (!product || !account) return sendText(sender.remote, "Uso: .addstock netflix cuenta");
     if (!db.stock[product]) db.stock[product] = [];
     db.stock[product].push(account);
-
     saveDB(db);
-
-    await sendText(
-      sender.remote,
-      `✅ Stock agregado a *${product}*.\n📦 Total: *${db.stock[product].length}*`
-    );
+    await sendText(sender.remote, `✅ Stock agregado a *${product}*. Total: *${db.stock[product].length}*`);
     return;
   }
 
   if (command === "setprecio") {
-    if (!(await canAdmin(sender))) {
-      await sendText(sender.remote, "❌ Solo un administrador puede usar este comando.");
-      return;
-    }
-
+    if (!(await canAdmin(sender))) return sendText(sender.remote, "❌ Solo un administrador.");
     const product = String(args[0] || "").toLowerCase();
     const price = Number(args[1]);
-
-    if (!product || !Number.isFinite(price) || price < 0) {
-      await sendText(sender.remote, "Uso:\n.setprecio netflix 65");
-      return;
-    }
-
+    if (!product || !Number.isFinite(price) || price < 0) return sendText(sender.remote, "Uso: .setprecio netflix 65");
     db.precios[product] = price;
     if (!db.stock[product]) db.stock[product] = [];
     saveDB(db);
-
-    await sendText(
-      sender.remote,
-      `✅ Precio de *${product}* establecido en *$${price} MXN*.`
-    );
-    return;
-  }
-
-  if (command === "addpago") {
-    if (!(await canAdmin(sender))) {
-      await sendText(sender.remote, "❌ Solo un administrador puede usar este comando.");
-      return;
-    }
-
-    const method = String(args.shift() || "").toLowerCase();
-    const details = args.join(" ").trim();
-
-    if (!["transferencia", "oxxo"].includes(method) || !details) {
-      await sendText(
-        sender.remote,
-        "Uso:\n.addpago transferencia BBVA CLABE XXXXX\n.addpago oxxo Número XXXXX"
-      );
-      return;
-    }
-
-    db.pagos[method] = details;
-    saveDB(db);
-
-    await sendText(sender.remote, `✅ Método de pago *${method}* actualizado.`);
-    return;
-  }
-
-  if (command === "delpago") {
-    if (!(await canAdmin(sender))) {
-      await sendText(sender.remote, "❌ Solo un administrador puede usar este comando.");
-      return;
-    }
-
-    const method = String(args[0] || "").toLowerCase();
-
-    if (!["transferencia", "oxxo"].includes(method)) {
-      await sendText(sender.remote, "Uso:\n.delpago transferencia\n.delpago oxxo");
-      return;
-    }
-
-    db.pagos[method] = "No configurado";
-    saveDB(db);
-
-    await sendText(sender.remote, `✅ Método *${method}* eliminado.`);
+    await sendText(sender.remote, `✅ Precio de *${product}* establecido en *$${price} MXN*.`);
     return;
   }
 
   if (command === "abrir" || command === "cerrar") {
-    if (!sender.isGroup) {
-      await sendText(sender.remote, "❌ Este comando solo funciona dentro de un grupo.");
-      return;
-    }
-
-    if (!(await canAdmin(sender))) {
-      await sendText(sender.remote, "❌ Solo un administrador del grupo puede usarlo.");
-      return;
-    }
-
+    if (!sender.isGroup || !(await canAdmin(sender))) return;
     try {
-      const setting = command === "abrir" ? "not_announcement" : "announcement";
-      await sock.groupSettingUpdate(sender.remote, setting);
-
-      await sendText(
-        sender.remote,
-        command === "abrir"
-          ? "🔓 *GRUPO ABIERTO*\nTodos pueden enviar mensajes."
-          : "🔒 *GRUPO CERRADO*\nSolo los administradores pueden enviar mensajes."
-      );
-    } catch (e) {
-      await sendText(
-        sender.remote,
-        "❌ No pude cambiar la configuración. Asegúrate de que el bot sea administrador del grupo."
-      );
-    }
+      await sock.groupSettingUpdate(sender.remote, command === "abrir" ? "not_announcement" : "announcement");
+      await sendText(sender.remote, command === "abrir" ? "🔓 Grupo abierto." : "🔒 Grupo cerrado.");
+    } catch (e) {}
     return;
   }
 }
 
 async function startBot() {
-  if (starting) return;
-  starting = true;
-
   try {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     const { version } = await fetchLatestBaileysVersion();
 
-    const newSock = makeWASocket({
+    sock = makeWASocket({
       version,
       logger: pino({ level: "silent" }),
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" }))
-      },
+      auth: state,
       printQRInTerminal: false,
-      markOnlineOnConnect: false,
-      syncFullHistory: false
+      markOnlineOnConnect: false
     });
 
-    sock = newSock;
     sock.ev.on("creds.update", saveCreds);
 
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        try {
-          qrImage = await QRCode.toDataURL(qr);
-          console.log("📱 QR generado. Abre la URL de Railway para escanearlo.");
-        } catch (e) {}
+        qrImage = await QRCode.toDataURL(qr);
+        console.log("📱 QR generado con éxito.");
       }
 
       if (connection === "open") {
         qrImage = "";
-        console.log("✅ WhatsApp conectado correctamente.");
+        console.log("✅ Conectado a WhatsApp con éxito.");
       }
 
       if (connection === "close") {
         qrImage = "";
-
-        const statusCode =
-          lastDisconnect?.error?.output?.statusCode ??
-          lastDisconnect?.error?.statusCode;
-
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-        console.log(`⚠️ WhatsApp desconectado. Código: ${statusCode}. Reconectar: ${shouldReconnect}`);
-
         sock = null;
-
-        if (shouldReconnect) {
-          setTimeout(() => {
-            starting = false;
-            startBot();
-          }, 6000);
-        } else {
-          console.log("🔐 Sesión cerrada limpiando credenciales...");
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        console.log(`⚠️ Desconectado. Código: ${statusCode}`);
+        
+        // Si hay error de sesión, limpiamos automáticamente para forzar nuevo QR limpio
+        if (statusCode === DisconnectReason.loggedOut || !statusCode) {
           try {
             fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-          } catch (err) {}
-          starting = false;
-          setTimeout(startBot, 4000);
+          } catch (e) {}
         }
+        setTimeout(startBot, 4000);
       }
     });
 
-    newSock.ev.on("messages.upsert", async ({ messages, type }) => {
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
       if (type !== "notify") return;
-
       for (const message of messages) {
-        try {
-          await handleCommand(message);
-        } catch (e) {}
+        try { await handleCommand(message); } catch (e) {}
       }
     });
-
   } catch (e) {
     sock = null;
-    starting = false;
-    setTimeout(() => {
-      startBot();
-    }, 8000);
-    return;
+    setTimeout(startBot, 6000);
   }
-
-  starting = false;
 }
 
 app.get("/", (req, res) => {
@@ -567,42 +329,41 @@ app.get("/", (req, res) => {
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>Bot WhatsApp</title>
+        <title>Bot WhatsApp - QR</title>
+        <meta http-equiv="refresh" content="5">
         <style>
-          body{font-family:Arial,sans-serif;background:#111;color:#fff;text-align:center;padding:30px}
-          .card{max-width:430px;margin:auto;background:#1d1d1d;padding:25px;border-radius:18px}
-          img{max-width:100%;background:#fff;padding:10px;border-radius:12px}
+          body{font-family:Arial,sans-serif;background:#111;color:#fff;text-align:center;padding:40px}
+          .card{max-width:400px;margin:auto;background:#1d1d1d;padding:30px;border-radius:15px;box-shadow:0 4px 15px rgba(0,0,0,0.5)}
+          img{max-width:100%;background:#fff;padding:10px;border-radius:10px}
         </style>
       </head>
       <body>
         <div class="card">
-          <h2>📱 Vincular Bot WhatsApp</h2>
-          <p>Escanea este QR desde WhatsApp → Dispositivos vinculados.</p>
-          <img src="${qrImage}" alt="QR">
-          <p>La página se actualiza automáticamente.</p>
+          <h2>📱 Vincular Bot</h2>
+          <p>Escanea el código QR:</p>
+          <img src="${qrImage}" alt="QR Code">
+          <p style="font-size:12px; color:#888;">Se actualiza automáticamente</p>
         </div>
       </body>
       </html>
     `);
   }
-
-  res.send("✅ Bot de WhatsApp activo.");
+  res.send("<h2>✅ Bot de WhatsApp activo y conectado.</h2>");
 });
 
 app.get("/health", (req, res) => {
-  res.status(200).json({
-    ok: true,
-    whatsapp: !!sock,
-    qr: !!qrImage
-  });
+  res.status(200).json({ ok: true, connected: !!sock });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Servidor HTTP activo en puerto ${PORT}`);
-  // Retraso de 3 segundos para que el servidor Express asiente antes de abrir el socket de WhatsApp
-  setTimeout(() => {
-    startBot();
-  }, 3000);
+  
+  // Limpiamos la sesión corrupta anterior antes de iniciar para forzar QR fresco
+  try {
+    fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+  } catch (e) {}
+
+  setTimeout(startBot, 2000);
 });
 
 process.on("uncaughtException", () => {});

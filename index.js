@@ -178,23 +178,31 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Extracción segura del número real para chat privado
+                // Extracción limpia del número para chat privado
                 const userNumber = sender.split('@')[0].split(':')[0];
                 const privateJid = `${userNumber}@s.whatsapp.net`;
 
-                // 1. Envío exclusivo al chat privado del usuario
                 try {
-                    await sock.sendMessage(privateJid, { 
+                    // Validamos y abrimos canal directo en WhatsApp antes de enviar
+                    const [result] = await sock.onWhatsApp(userNumber);
+                    const targetJid = result?.exists ? result.jid : privateJid;
+
+                    // Envío estricto y exclusivo al chat PRIVADO del usuario
+                    await sock.sendMessage(targetJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
+                    
+                    // Notificación limpia en el grupo
+                    await sock.sendMessage(from, { 
+                        text: `✅ Compra de *${producto.toUpperCase()}* realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
+                    });
                 } catch (e) {
-                    console.log("Error enviando al privado:", e);
+                    console.log("Error crítico enviando al privado:", e);
+                    // Resguardo de emergencia si WhatsApp bloquea el privado
+                    await sock.sendMessage(from, { 
+                        text: `🎉 *${producto.toUpperCase()}* (Privado falló, entrega directa):\n${cuentaEntregada}` 
+                    });
                 }
-
-                // 2. Aviso limpio en el grupo
-                await sock.sendMessage(from, { 
-                    text: `✅ Compra de *${producto.toUpperCase()}* realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
-                });
             }
             else if (command === 'addsaldo' && await isAdmin()) {
                 const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
@@ -234,10 +242,9 @@ async function startBot() {
 
 startBot();
 
-// Auto-ping de mantenimiento para mantener el contenedor despierto
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
 }, 30000);
 
-process.on('uncaughtException', (err) => { console.log('Excepción atrapada:', err); });
-process.on('unhandledRejection', (err) => { console.log('Promesa rechazada:', err); });
+process.on('uncaughtException', (err) => {});
+process.on('unhandledRejection', (err) => {});

@@ -4,9 +4,54 @@ const {
     DisconnectReason,
     fetchLatestBaileysVersion
 } = require('@whiskeysockets/baileys');
+const express = require('express');
 const fs = require('fs');
 const pino = require('pino');
+const QRCode = require('qrcode');
 
+let qrImage = '';
+
+// Servidor HTTP obligatorio para que Railway NUNCA apague el contenedor
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    if (qrImage) {
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>QR Bot WhatsApp</title>
+                <meta http-equiv="refresh" content="5">
+                <style>
+                    body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; background: #f4f4f9; margin: 0; }
+                    .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); text-align: center; }
+                    img { width: 280px; height: 280px; margin: 15px 0; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h2>Escanea el QR para vincular el Bot</h2>
+                    <img src="${qrImage}" alt="QR Code"/>
+                    <p>Bot Tienda Samantha Online 24/7 🚀</p>
+                </div>
+            </body>
+            </html>
+        `);
+    } else {
+        res.status(200).send('OK - Bot Activo 24/7');
+    }
+});
+
+app.get('/health', (req, res) => {
+    res.status(200).send('Healthy');
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor HTTP activo y respondiendo en el puerto ${PORT}`);
+});
+
+// Base de datos local
 if (!fs.existsSync('./datos')) {
     fs.mkdirSync('./datos');
 }
@@ -38,13 +83,17 @@ async function startBot() {
             version,
             logger: pino({ level: 'silent' }),
             auth: state,
-            printQRInTerminal: true
+            printQRInTerminal: false
         });
 
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
+
+            if (qr) {
+                qrImage = await QRCode.toDataURL(qr);
+            }
 
             if (connection === 'close') {
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
@@ -56,6 +105,7 @@ async function startBot() {
                     setTimeout(() => startBot(), 3000);
                 }
             } else if (connection === 'open') {
+                qrImage = ''; 
                 console.log('✅ Bot conectado exitosamente a WhatsApp.');
             }
         });
@@ -119,7 +169,7 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Envío directo al chat actual sin bloqueos
+                // Envío directo al chat actual
                 await sock.sendMessage(from, { 
                     text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                 });
@@ -155,9 +205,13 @@ async function startBot() {
             }
         });
     } catch (error) {
-        console.log("Error crítico, reiniciando...", error);
+        console.log("Error en el bot, reintentando...", error);
         setTimeout(() => startBot(), 5000);
     }
 }
 
 startBot();
+
+// Evita que caídas inesperadas apaguen el script principal
+process.on('uncaughtException', () => {});
+process.on('unhandledRejection', () => {});

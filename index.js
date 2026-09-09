@@ -12,7 +12,6 @@ const http = require('http');
 
 let qrImage = '';
 
-// Servidor HTTP obligatorio para Railway
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -48,7 +47,7 @@ app.get('/health', (req, res) => {
     res.status(200).send('Healthy');
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor HTTP activo y respondiendo en el puerto ${PORT}`);
 });
 
@@ -170,20 +169,20 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Destino privado garantizado (convierte el participante del grupo en chat directo 100% privado)
+                // Destino privado garantizado
                 const cleanNumber = sender.split('@')[0].replace(/[^0-9]/g, '');
                 const targetJid = `${cleanNumber}@s.whatsapp.net`;
 
-                // 1. Envía las credenciales EXCLUSIVAMENTE AL PRIVADO del cliente
+                // 1. Envío obligatorio en PRIVADO con await estricto
                 try {
                     await sock.sendMessage(targetJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
                 } catch (e) {
-                    console.log("Error enviando al privado:", e);
+                    console.log("Error al enviar por privado:", e);
                 }
 
-                // 2. Confirma únicamente en el chat de origen (grupo) que ya se despachó
+                // 2. Confirmación en el chat de origen
                 await sock.sendMessage(from, { 
                     text: `✅ Compra realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
                 });
@@ -226,10 +225,10 @@ async function startBot() {
 
 startBot();
 
-// --- AUTO-PING CORREGIDO CON 127.0.0.1 PARA EVITAR CAÍDAS EN RAILWAY ---
+// --- AUTO-PING ROBUSTO DIRECTO AL PUERTO LOCAL ---
 setInterval(() => {
-    http.get(`http://127.0.0.1:${PORT}/`, (res) => {}).on('error', (err) => {});
-}, 120000); // Cada 2 minutos
+    http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
+}, 60000); // Cada 1 minuto exacto para mantener el contenedor despierto sí o sí
 
 process.on('uncaughtException', () => {});
 process.on('unhandledRejection', () => {});

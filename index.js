@@ -9,10 +9,8 @@ const fs = require('fs');
 const pino = require('pino');
 const QRCode = require('qrcode');
 
-// Variable global para guardar la imagen del QR
 let qrImage = '';
 
-// --- SERVIDOR EXPRESS (Mantiene el contenedor activo 24/7) ---
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -52,7 +50,6 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => console.log(`Servidor web activo en el puerto ${PORT}`));
 
-// --- BASE DE DATOS LOCAL Y SESIÓN (Carpeta datos) ---
 if (!fs.existsSync('./datos')) {
     fs.mkdirSync('./datos');
 }
@@ -75,7 +72,6 @@ function saveDB(data) {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-// --- LÓGICA PRINCIPAL DEL BOT ---
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./datos/auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -177,8 +173,10 @@ async function startBot() {
             const cuentaEntregada = db.stock[producto].shift();
             saveDB(db);
 
-            // Envío directo forzado para evitar error 463
-            const targetJid = sender.includes('@') ? sender : `${sender}@s.whatsapp.net`;
+            // Limpieza estricta de ID para que nunca falle el envío privado
+            const rawNumber = sender.split('@')[0];
+            const targetJid = rawNumber + '@s.whatsapp.net';
+
             await sock.sendMessage(targetJid, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
             
             await sock.sendMessage(from, { text: `✅ Compra realizada. Te enviamos las credenciales por privado.` }, { quoted: m });

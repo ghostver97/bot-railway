@@ -53,7 +53,6 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => console.log(`Servidor activo en el puerto ${PORT}`));
 
 // --- BASE DE DATOS LOCAL Y SESIÓN (Carpeta datos) ---
-// Creamos la carpeta 'datos' si no existe
 if (!fs.existsSync('./datos')) {
     fs.mkdirSync('./datos');
 }
@@ -78,14 +77,15 @@ function saveDB(data) {
 
 // --- LÓGICA PRINCIPAL DEL BOT ---
 async function startBot() {
-    // Cambiamos la ruta de la sesión a la carpeta 'datos'
     const { state, saveCreds } = await useMultiFileAuthState('./datos/auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
         version,
-        logger: pino({ level: 'silent' }),
-        auth: state
+        // Cambiamos a 'info' para poder leer el error real si es que hay uno
+        logger: pino({ level: 'info' }), 
+        auth: state,
+        printQRInTerminal: true
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -93,18 +93,30 @@ async function startBot() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // Generar imagen base64 si Baileys entrega un nuevo QR
         if (qr) {
             qrImage = await QRCode.toDataURL(qr);
             console.log('⚡ Nuevo QR generado. Disponible en la ruta Web.');
         }
 
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Conexión cerrada. Intentando reconectar...', shouldReconnect);
-            if (shouldReconnect) startBot();
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            
+            if (shouldReconnect) {
+                console.log('⚠️ Conexión cerrada. Intentando reconectar en 3 segundos...');
+                // Freno de 3 segundos para evitar el bucle infinito que viste
+                setTimeout(() => {
+                    startBot();
+                }, 3000);
+            } else {
+                console.log('❌ Sesión cerrada permanentemente (Desconectado desde el celular). Borrando sesión...');
+                qrImage = '';
+                // Borra la sesión corrupta para permitir un escaneo nuevo
+                fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true });
+                setTimeout(() => startBot(), 3000);
+            }
         } else if (connection === 'open') {
-            qrImage = ''; // Limpia el QR al conectarse con éxito
+            qrImage = ''; 
             console.log('✅ Bot conectado exitosamente a WhatsApp.');
         }
     });
@@ -118,14 +130,11 @@ async function startBot() {
         const isGroup = from.endsWith('@g.us');
         const sender = isGroup ? m.key.participant : from;
 
-        const body = m.message.conversation ||
-                     m.message.extendedTextMessage?.text || '';
-
+        const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
         if (!body.startsWith('.')) return;
 
         const args = body.slice(1).trim().split(/ +/);
         const command = args.shift().toLowerCase();
-
         const db = loadDB();
 
         async function isAdmin() {
@@ -139,139 +148,69 @@ async function startBot() {
             }
         }
 
-        // === COMANDOS CLIENTES ===
-
         if (command === 'menu' || command === 'tienda') {
-            let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n`;
-            text += `👤 *Tu Saldo:* $${db.saldos[sender] || 0} MXN\n\n`;
-            text += `📦 *Productos disponibles:*\n`;
-
+            let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[sender] || 0} MXN\n\n📦 *Productos:*\n`;
             const productos = Object.keys(db.precios);
             if (productos.length === 0) {
-                text += `_No hay productos registrados aún._\n`;
+                text += `_No hay productos registrados._\n`;
             } else {
                 productos.forEach(p => {
-                    const precio = db.precios[p];
-                    const cantStock = (db.stock[p] || []).length;
-                    text += `• *${p.toUpperCase()}* - $${precio} MXN (Stock: ${cantStock})\n`;
+                    text += `• *${p.toUpperCase()}* - $${db.precios[p]} MXN (Stock: ${(db.stock[p] || []).length})\n`;
                 });
             }
-            text += `\n💡 *Comandos disponibles:*\n`;
-            text += `• .comprar <producto> - Comprar cuenta\n`;
-            text += `• .saldo - Ver tu saldo\n`;
-            text += `• .stock - Ver inventario\n`;
             await sock.sendMessage(from, { text }, { quoted: m });
         }
-
         else if (command === 'saldo') {
-            const saldo = db.saldos[sender] || 0;
-            await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${saldo} MXN*` }, { quoted: m });
+            await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[sender] || 0} MXN*` }, { quoted: m });
         }
-
         else if (command === 'stock') {
             let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
-            for (const p in db.precios) {
-                const cant = (db.stock[p] || []).length;
-                text += `• *${p.toUpperCase()}*: ${cant} disponibles\n`;
-            }
+            for (const p in db.precios) text += `• *${p.toUpperCase()}*: ${(db.stock[p] || []).length} disponibles\n`;
             await sock.sendMessage(from, { text }, { quoted: m });
         }
-
         else if (command === 'comprar') {
             const producto = args[0]?.toLowerCase();
-            if (!producto) {
-                return sock.sendMessage(from, { text: `❌ Usa: .comprar <producto>` }, { quoted: m });
-            }
-
-            if (!db.precios[producto]) {
-                return sock.sendMessage(from, { text: `❌ El producto *${producto}* no existe en el catálogo.` }, { quoted: m });
-            }
-
+            if (!producto || !db.precios[producto]) return sock.sendMessage(from, { text: `❌ Producto no válido.` }, { quoted: m });
             const precio = db.precios[producto];
             const userSaldo = db.saldos[sender] || 0;
-
-            if (userSaldo < precio) {
-                return sock.sendMessage(from, { text: `❌ Saldo insuficiente. Cuesta $${precio} MXN y tu saldo es de $${userSaldo} MXN.` }, { quoted: m });
-            }
-
-            if (!db.stock[producto] || db.stock[producto].length === 0) {
-                return sock.sendMessage(from, { text: `❌ Agotado. No hay stock disponible para *${producto}*.` }, { quoted: m });
-            }
-
+            if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` }, { quoted: m });
+            if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` }, { quoted: m });
+            
             db.saldos[sender] -= precio;
             const cuentaEntregada = db.stock[producto].shift();
             saveDB(db);
-
-            await sock.sendMessage(sender, {
-                text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}\n\nGracias por comprar en Samantha Store.`
-            });
-
-            await sock.sendMessage(from, {
-                text: `✅ *Compra realizada.* Te hemos enviado las credenciales por mensaje privado. Saldo restante: *$${db.saldos[sender]} MXN*.`
-            }, { quoted: m });
+            await sock.sendMessage(sender, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
+            await sock.sendMessage(from, { text: `✅ Compra realizada. Te enviamos las credenciales por privado.` }, { quoted: m });
         }
-
-        // === COMANDOS ADMINS ===
-
-        else if (command === 'addsaldo') {
-            if (!(await isAdmin())) {
-                return sock.sendMessage(from, { text: `❌ Solo los administradores del grupo pueden usar este comando.` }, { quoted: m });
-            }
-
+        else if (command === 'addsaldo' && await isAdmin()) {
             const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
             const monto = parseInt(args[1] || args[0]);
-
-            if (!mentioned || isNaN(monto)) {
-                return sock.sendMessage(from, { text: `❌ Usa: .addsaldo @usuario <monto>` }, { quoted: m });
+            if (mentioned && !isNaN(monto)) {
+                db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
+                saveDB(db);
+                await sock.sendMessage(from, { text: `✅ $${monto} agregados a @${mentioned.split('@')[0]}`, mentions: [mentioned] }, { quoted: m });
             }
-
-            db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
-            saveDB(db);
-
-            await sock.sendMessage(from, { 
-                text: `✅ Se agregaron *$${monto} MXN* al saldo de @${mentioned.split('@')[0]}`, 
-                mentions: [mentioned] 
-            }, { quoted: m });
         }
-
-        else if (command === 'addstock') {
-            if (!(await isAdmin())) {
-                return sock.sendMessage(from, { text: `❌ Comando exclusivo para administradores.` }, { quoted: m });
-            }
-
+        else if (command === 'addstock' && await isAdmin()) {
             const producto = args[0]?.toLowerCase();
             const cuenta = args.slice(1).join(' ');
-
-            if (!producto || !cuenta) {
-                return sock.sendMessage(from, { text: `❌ Usa: .addstock <producto> <correo:contraseña>` }, { quoted: m });
+            if (producto && cuenta) {
+                if (!db.stock[producto]) db.stock[producto] = [];
+                db.stock[producto].push(cuenta);
+                saveDB(db);
+                await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto}*. Total: ${db.stock[producto].length}` }, { quoted: m });
             }
-
-            if (!db.stock[producto]) db.stock[producto] = [];
-            db.stock[producto].push(cuenta);
-            saveDB(db);
-
-            await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto.toUpperCase()}*. Total en stock: ${db.stock[producto].length}` }, { quoted: m });
         }
-
-        else if (command === 'setprecio') {
-            if (!(await isAdmin())) {
-                return sock.sendMessage(from, { text: `❌ Comando exclusivo para administradores.` }, { quoted: m });
-            }
-
+        else if (command === 'setprecio' && await isAdmin()) {
             const producto = args[0]?.toLowerCase();
             const precio = parseInt(args[1]);
-
-            if (!producto || isNaN(precio)) {
-                return sock.sendMessage(from, { text: `❌ Usa: .setprecio <producto> <precio>` }, { quoted: m });
+            if (producto && !isNaN(precio)) {
+                db.precios[producto] = precio;
+                if (!db.stock[producto]) db.stock[producto] = [];
+                saveDB(db);
+                await sock.sendMessage(from, { text: `✅ Precio de *${producto}* ajustado a *$${precio} MXN*.` }, { quoted: m });
             }
-
-            db.precios[producto] = precio;
-            if (!db.stock[producto]) db.stock[producto] = [];
-            saveDB(db);
-
-            await sock.sendMessage(from, { text: `✅ Precio de *${producto.toUpperCase()}* ajustado a *$${precio} MXN*.` }, { quoted: m });
         }
     });
 }
-
 startBot();

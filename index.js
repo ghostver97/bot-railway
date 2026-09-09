@@ -14,6 +14,7 @@ let qrImage = '';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Ruta principal optimizada para que Railway detecte vida activa 24/7
 app.get('/', (req, res) => {
     if (qrImage) {
         res.send(`
@@ -39,13 +40,13 @@ app.get('/', (req, res) => {
             </html>
         `);
     } else {
-        res.send(`
-            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
-                <h2>Bot Tienda Samantha Online 24/7 🚀</h2>
-                <p>El bot ya está <b>conectado</b> y operando en la nube 24/7.</p>
-            </div>
-        `);
+        res.status(200).send('OK - Bot Activo 24/7');
     }
+});
+
+// Ruta de salud obligatoria para Railway
+app.get('/health', (req, res) => {
+    res.status(200).send('Healthy');
 });
 
 app.listen(PORT, '0.0.0.0', () => {
@@ -219,10 +220,5 @@ async function startBot() {
 
 startBot();
 
-// Mantiene el proceso vivo ante cualquier imprevisto de Node.js
-process.on('uncaughtException', (err) => {
-    console.error('Error no controlado:', err);
-});
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Promesa rechazada no controlada:', reason);
-});
+process.on('uncaughtException', (err) => {});
+process.on('unhandledRejection', (reason, promise) => {});

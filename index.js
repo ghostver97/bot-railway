@@ -127,7 +127,7 @@ async function startBot() {
             const from = m.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
             
-            // Unificación estricta del número del usuario
+            // Extracción estricta del emisor
             const rawSender = isGroup ? (m.key.participant || m.participant || from) : from;
             const cleanNum = rawSender.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
             const userJid = `${cleanNum}@s.whatsapp.net`;
@@ -183,12 +183,9 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // --- ENVÍO PRIVADO FORZADO Y VERIFICADO ---
+                // --- ENVÍO DIRECTO AL PRIVADO SIN BLOQUEOS ---
                 try {
-                    const [result] = await sock.onWhatsApp(cleanNum);
-                    const targetJid = result?.exists ? result.jid : userJid;
-
-                    await sock.sendMessage(targetJid, { 
+                    await sock.sendMessage(userJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
                 } catch (e) {
@@ -243,10 +240,10 @@ async function startBot() {
 
 startBot();
 
-// Auto-ping estricto para mantener Railway despierto
+// Auto-ping rápido cada 15 segundos para asegurar que Railway nunca apague el contenedor
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
-}, 20000);
+}, 15000);
 
 process.on('uncaughtException', (err) => {});
 process.on('unhandledRejection', (err) => {});

@@ -170,9 +170,22 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Envío directo al chat actual
+                // Limpieza del número para enviar al privado del cliente
+                const cleanNumber = sender.split('@')[0].replace(/[^0-9]/g, '');
+                const targetJid = `${cleanNumber}@s.whatsapp.net`;
+
+                // 1. Envía las credenciales por PRIVADO al cliente
+                try {
+                    await sock.sendMessage(targetJid, { 
+                        text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
+                    });
+                } catch (e) {
+                    console.log("No se pudo enviar al privado:", e);
+                }
+
+                // 2. Confirma en el chat (grupo o privado) que la compra fue procesada
                 await sock.sendMessage(from, { 
-                    text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
+                    text: `✅ Compra realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
                 });
             }
             else if (command === 'addsaldo' && await isAdmin()) {

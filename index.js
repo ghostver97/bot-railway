@@ -14,7 +14,7 @@ let qrImage = '';
 let activeSock = null;
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 app.get('/', (req, res) => {
     if (qrImage) {
@@ -128,7 +128,6 @@ async function startBot() {
                 const from = m.key.remoteJid;
                 const isGroup = from.endsWith('@g.us');
                 
-                // Determinamos de forma limpia el JID del usuario tanto para chat privado como para grupo
                 const rawSender = isGroup ? (m.key.participant || m.participant) : from;
                 if (!rawSender) return;
                 
@@ -143,7 +142,7 @@ async function startBot() {
                 const db = loadDB();
 
                 async function isAdmin() {
-                    if (!isGroup) return true; // Si es chat privado, el dueño siempre es admin
+                    if (!isGroup) return true;
                     try {
                         const metadata = await sock.groupMetadata(from);
                         const p = metadata.participants.find(item => item.id.includes(cleanNum));
@@ -197,12 +196,12 @@ async function startBot() {
                     const cuentaEntregada = db.stock[producto].shift();
                     saveDB(db);
 
-                    // Enviar credenciales EXCLUSIVAMENTE AL CHAT PRIVADO del usuario
+                    // Envío exclusivo al chat privado del usuario
                     await sock.sendMessage(userJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
 
-                    // Si la compra se hizo en un grupo, mandamos un aviso limpio ahí
+                    // Aviso en el grupo si se compró desde ahí
                     if (isGroup) {
                         await sock.sendMessage(from, { 
                             text: `✅ Compra de *${producto.toUpperCase()}* procesada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 

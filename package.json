@@ -1,18 +1,18 @@
 {
   "name": "bot-samantha-hacker",
   "version": "1.0.0",
-  "description": "Bot de WhatsApp para ventas automáticas",
+  "description": "Bot de WhatsApp para Tienda Samantha",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.0",
+    "@whiskeysockets/baileys": "^6.7.12",
     "express": "^4.19.2",
-    "pino": "^8.20.0",
+    "pino": "^9.0.0",
     "qrcode": "^1.5.3"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=18.x"
   }
 }

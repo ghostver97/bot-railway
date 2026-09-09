@@ -51,7 +51,6 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor HTTP activo y respondiendo en el puerto ${PORT}`);
 });
 
-// Base de datos local
 if (!fs.existsSync('./datos')) {
     fs.mkdirSync('./datos');
 }
@@ -169,23 +168,27 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Destino privado garantizado
-                const cleanNumber = sender.split('@')[0].replace(/[^0-9]/g, '');
-                const targetJid = `${cleanNumber}@s.whatsapp.net`;
+                // Manejo blindado de JID para evitar bloqueos por @lid de WhatsApp
+                let targetJid = sender;
+                if (targetJid.includes('@lid') || !targetJid.includes('@s.whatsapp.net')) {
+                    targetJid = from; // Si el grupo oculta el número, se entrega directo en el chat para garantizar la entrega
+                }
 
-                // 1. Envío obligatorio en PRIVADO con await estricto
                 try {
                     await sock.sendMessage(targetJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
                 } catch (e) {
-                    console.log("Error al enviar por privado:", e);
+                    await sock.sendMessage(from, { 
+                        text: `🎉 *¡COMPRA EXITOSA!*\n📦 *${producto.toUpperCase()}*:\n${cuentaEntregada}` 
+                    });
                 }
 
-                // 2. Confirmación en el chat de origen
-                await sock.sendMessage(from, { 
-                    text: `✅ Compra realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
-                });
+                if (targetJid !== from) {
+                    await sock.sendMessage(from, { 
+                        text: `✅ Compra realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
+                    });
+                }
             }
             else if (command === 'addsaldo' && await isAdmin()) {
                 const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
@@ -225,10 +228,9 @@ async function startBot() {
 
 startBot();
 
-// --- AUTO-PING ROBUSTO DIRECTO AL PUERTO LOCAL ---
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
-}, 60000); // Cada 1 minuto exacto para mantener el contenedor despierto sí o sí
+}, 60000);
 
 process.on('uncaughtException', () => {});
 process.on('unhandledRejection', () => {});

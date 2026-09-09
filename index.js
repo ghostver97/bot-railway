@@ -82,7 +82,6 @@ async function startBot() {
 
     const sock = makeWASocket({
         version,
-        // Cambiamos a 'info' para poder leer el error real si es que hay uno
         logger: pino({ level: 'info' }), 
         auth: state,
         printQRInTerminal: true
@@ -104,14 +103,12 @@ async function startBot() {
             
             if (shouldReconnect) {
                 console.log('⚠️ Conexión cerrada. Intentando reconectar en 3 segundos...');
-                // Freno de 3 segundos para evitar el bucle infinito que viste
                 setTimeout(() => {
                     startBot();
                 }, 3000);
             } else {
-                console.log('❌ Sesión cerrada permanentemente (Desconectado desde el celular). Borrando sesión...');
+                console.log('❌ Sesión cerrada permanentemente. Borrando sesión...');
                 qrImage = '';
-                // Borra la sesión corrupta para permitir un escaneo nuevo
                 fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true });
                 setTimeout(() => startBot(), 3000);
             }
@@ -179,7 +176,11 @@ async function startBot() {
             db.saldos[sender] -= precio;
             const cuentaEntregada = db.stock[producto].shift();
             saveDB(db);
-            await sock.sendMessage(sender, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
+
+            // Corrección aplicada aquí para asegurar el envío del mensaje privado (evita el error 463)
+            const cleanSender = sender.includes('@') ? sender.split('@')[0] + '@s.whatsapp.net' : sender;
+            await sock.sendMessage(cleanSender, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
+            
             await sock.sendMessage(from, { text: `✅ Compra realizada. Te enviamos las credenciales por privado.` }, { quoted: m });
         }
         else if (command === 'addsaldo' && await isAdmin()) {

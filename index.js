@@ -221,10 +221,10 @@ async function startBot() {
         sock = null;
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         console.log(`⚠️ Desconectado. Código: ${statusCode}`);
-        if (statusCode === DisconnectReason.loggedOut || !statusCode) {
+        if (statusCode === DisconnectReason.loggedOut) {
           try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) {}
         }
-        setTimeout(startBot, 3000);
+        setTimeout(startBot, 5000);
       }
     });
 
@@ -236,7 +236,7 @@ async function startBot() {
     });
   } catch (e) {
     sock = null;
-    setTimeout(startBot, 5000);
+    setTimeout(startBot, 8000);
   }
 }
 
@@ -250,8 +250,8 @@ app.get("/health", (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Servidor HTTP en puerto ${PORT}`);
-  setTimeout(startBot, 1000);
+  setTimeout(startBot, 3000);
 });
 
-process.on("uncaughtException", () => {});
-process.on("unhandledRejection", () => {});
+process.on("uncaughtException", (err) => { console.error("Error:", err); });
+process.on("unhandledRejection", (err) => { console.error("Rejection:", err); });

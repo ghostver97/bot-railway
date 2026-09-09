@@ -120,117 +120,120 @@ async function startBot() {
         });
 
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
-            if (type !== 'notify') return;
-            const m = messages[0];
-            if (!m.message || m.key.fromMe) return;
+            try {
+                if (type !== 'notify') return;
+                const m = messages[0];
+                if (!m.message || m.key.fromMe) return;
 
-            const from = m.key.remoteJid;
-            const isGroup = from.endsWith('@g.us');
-            
-            const rawSender = isGroup ? (m.key.participant || m.participant || from) : from;
-            const cleanNum = rawSender.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
-            const userJid = `${cleanNum}@s.whatsapp.net`;
+                const from = m.key.remoteJid;
+                const isGroup = from.endsWith('@g.us');
+                
+                const rawSender = isGroup ? (m.key.participant || m.participant || from) : from;
+                const cleanNum = rawSender.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+                const userJid = `${cleanNum}@s.whatsapp.net`;
 
-            const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
-            if (!body.startsWith('.')) return;
+                const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
+                if (!body.startsWith('.')) return;
 
-            const args = body.slice(1).trim().split(/ +/);
-            const command = args.shift().toLowerCase();
-            const db = loadDB();
+                const args = body.slice(1).trim().split(/ +/);
+                const command = args.shift().toLowerCase();
+                const db = loadDB();
 
-            async function isAdmin() {
-                if (!isGroup) return false;
-                try {
-                    const metadata = await sock.groupMetadata(from);
-                    const p = metadata.participants.find(item => item.id.includes(cleanNum));
-                    return p && (p.admin === 'admin' || p.admin === 'superadmin');
-                } catch (e) {
-                    return false;
+                async function isAdmin() {
+                    if (!isGroup) return false;
+                    try {
+                        const metadata = await sock.groupMetadata(from);
+                        const p = metadata.participants.find(item => item.id.includes(cleanNum));
+                        return p && (p.admin === 'admin' || p.admin === 'superadmin');
+                    } catch (e) {
+                        return false;
+                    }
                 }
-            }
 
-            if (command === 'menu' || command === 'tienda') {
-                let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[userJid] || 0} MXN\n\n📦 *Productos:*\n`;
-                const productos = Object.keys(db.precios);
-                if (productos.length === 0) {
-                    text += `_No hay productos registrados._\n`;
-                } else {
-                    productos.forEach(p => {
-                        text += `• *${p.toUpperCase()}* - $${db.precios[p]} MXN (Stock: ${(db.stock[p] || []).length})\n`;
+                if (command === 'menu' || command === 'tienda') {
+                    let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[userJid] || 0} MXN\n\n📦 *Productos:*\n`;
+                    const productos = Object.keys(db.precios);
+                    if (productos.length === 0) {
+                        text += `_No hay productos registrados._\n`;
+                    } else {
+                        productos.forEach(p => {
+                            text += `• *${p.toUpperCase()}* - $${db.precios[p]} MXN (Stock: ${(db.stock[p] || []).length})\n`;
+                        });
+                    }
+                    await sock.sendMessage(from, { text });
+                }
+                else if (command === 'saldo') {
+                    await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[userJid] || 0} MXN*` });
+                }
+                else if (command === 'stock') {
+                    let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
+                    for (const p in db.precios) text += `• *${p.toUpperCase()}*: ${(db.stock[p] || []).length} disponibles\n`;
+                    await sock.sendMessage(from, { text });
+                }
+                else if (command === 'comprar') {
+                    const producto = args[0]?.toLowerCase();
+                    if (!producto || !db.precios[producto]) {
+                        await sock.sendMessage(from, { text: `❌ Producto no válido.` });
+                        return;
+                    }
+                    
+                    const precio = db.precios[producto];
+                    const userSaldo = db.saldos[userJid] || 0;
+                    
+                    if (userSaldo < precio) {
+                        await sock.sendMessage(from, { text: `❌ Saldo insuficiente.` });
+                        return;
+                    }
+                    
+                    if (!db.stock[producto] || db.stock[producto].length === 0) {
+                        await sock.sendMessage(from, { text: `❌ Agotado.` });
+                        return;
+                    }
+                    
+                    db.saldos[userJid] -= precio;
+                    const cuentaEntregada = db.stock[producto].shift();
+                    saveDB(db);
+
+                    await sock.sendMessage(from, { 
+                        text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
                 }
-                await sock.sendMessage(from, { text });
-            }
-            else if (command === 'saldo') {
-                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[userJid] || 0} MXN*` });
-            }
-            else if (command === 'stock') {
-                let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
-                for (const p in db.precios) text += `• *${p.toUpperCase()}*: ${(db.stock[p] || []).length} disponibles\n`;
-                await sock.sendMessage(from, { text });
-            }
-            else if (command === 'comprar') {
-                const producto = args[0]?.toLowerCase();
-                if (!producto || !db.precios[producto]) {
-                    await sock.sendMessage(from, { text: `❌ Producto no válido.` });
-                    return;
+                else if (command === 'addsaldo' && await isAdmin()) {
+                    let targetJid = userJid;
+                    const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                    if (mentioned) {
+                        const mentionNum = mentioned.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+                        targetJid = `${mentionNum}@s.whatsapp.net`;
+                    }
+                    const monto = parseInt(args[1] || args[0]);
+                    if (!isNaN(monto)) {
+                        db.saldos[targetJid] = (db.saldos[targetJid] || 0) + monto;
+                        saveDB(db);
+                        await sock.sendMessage(from, { text: `✅ $${monto} agregados correctamente al saldo del usuario.` });
+                    }
                 }
-                
-                const precio = db.precios[producto];
-                const userSaldo = db.saldos[userJid] || 0;
-                
-                if (userSaldo < precio) {
-                    await sock.sendMessage(from, { text: `❌ Saldo insuficiente.` });
-                    return;
+                else if (command === 'addstock' && await isAdmin()) {
+                    const producto = args[0]?.toLowerCase();
+                    const cuenta = args.slice(1).join(' ');
+                    if (producto && cuenta) {
+                        if (!db.stock[producto]) db.stock[producto] = [];
+                        db.stock[producto].push(cuenta);
+                        saveDB(db);
+                        await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto}*. Total: ${db.stock[producto].length}` });
+                    }
                 }
-                
-                if (!db.stock[producto] || db.stock[producto].length === 0) {
-                    await sock.sendMessage(from, { text: `❌ Agotado.` });
-                    return;
+                else if (command === 'setprecio' && await isAdmin()) {
+                    const producto = args[0]?.toLowerCase();
+                    const precio = parseInt(args[1]);
+                    if (producto && !isNaN(precio)) {
+                        db.precios[producto] = precio;
+                        if (!db.stock[producto]) db.stock[producto] = [];
+                        saveDB(db);
+                        await sock.sendMessage(from, { text: `✅ Precio de *${producto}* ajustado a *$${precio} MXN*.` });
+                    }
                 }
-                
-                db.saldos[userJid] -= precio;
-                const cuentaEntregada = db.stock[producto].shift();
-                saveDB(db);
-
-                // Envío de texto plano limpio, directo al chat actual sin menciones problemáticas
-                await sock.sendMessage(from, { 
-                    text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
-                });
-            }
-            else if (command === 'addsaldo' && await isAdmin()) {
-                let targetJid = userJid;
-                const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-                if (mentioned) {
-                    const mentionNum = mentioned.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
-                    targetJid = `${mentionNum}@s.whatsapp.net`;
-                }
-                const monto = parseInt(args[1] || args[0]);
-                if (!isNaN(monto)) {
-                    db.saldos[targetJid] = (db.saldos[targetJid] || 0) + monto;
-                    saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ $${monto} agregados correctamente al saldo del usuario.` });
-                }
-            }
-            else if (command === 'addstock' && await isAdmin()) {
-                const producto = args[0]?.toLowerCase();
-                const cuenta = args.slice(1).join(' ');
-                if (producto && cuenta) {
-                    if (!db.stock[producto]) db.stock[producto] = [];
-                    db.stock[producto].push(cuenta);
-                    saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto}*. Total: ${db.stock[producto].length}` });
-                }
-            }
-            else if (command === 'setprecio' && await isAdmin()) {
-                const producto = args[0]?.toLowerCase();
-                const precio = parseInt(args[1]);
-                if (producto && !isNaN(precio)) {
-                    db.precios[producto] = precio;
-                    if (!db.stock[producto]) db.stock[producto] = [];
-                    saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ Precio de *${producto}* ajustado a *$${precio} MXN*.` });
-                }
+            } catch (errInternal) {
+                console.log("Error procesando mensaje:", errInternal);
             }
         });
     } catch (error) {
@@ -241,10 +244,9 @@ async function startBot() {
 
 startBot();
 
-// Auto-ping estricto para mantener Railway despierto
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
 }, 15000);
 
-process.on('uncaughtException', (err) => {});
-process.on('unhandledRejection', (err) => {});
+process.on('uncaughtException', (err) => { console.log('Excepción global:', err); });
+process.on('unhandledRejection', (err) => { console.log('Promesa rechazada global:', err); });

@@ -8,10 +8,11 @@ const express = require('express');
 const fs = require('fs');
 const pino = require('pino');
 const QRCode = require('qrcode');
+const http = require('http');
 
 let qrImage = '';
 
-// Servidor HTTP obligatorio para que Railway NUNCA apague el contenedor
+// Servidor HTTP obligatorio para Railway
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -212,6 +213,10 @@ async function startBot() {
 
 startBot();
 
-// Evita que caídas inesperadas apaguen el script principal
+// --- AUTO-PING PARA EVITAR QUE RAILWAY APAGUE EL CONTENEDOR ---
+setInterval(() => {
+    http.get(`http://localhost:${PORT}/`, (res) => {}).on('error', (err) => {});
+}, 180000);
+
 process.on('uncaughtException', () => {});
 process.on('unhandledRejection', () => {});

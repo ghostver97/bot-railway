@@ -127,7 +127,7 @@ async function startBot() {
             const from = m.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
             
-            // --- UNIFICACIÓN ESTRICTA DE JID (Evita desajustes de saldo) ---
+            // Unificación estricta del número del usuario
             const rawSender = isGroup ? (m.key.participant || m.participant || from) : from;
             const cleanNum = rawSender.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
             const userJid = `${cleanNum}@s.whatsapp.net`;
@@ -179,18 +179,20 @@ async function startBot() {
                 if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` });
                 if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` });
                 
-                // Descontar saldo usando la misma clave unificada
                 db.saldos[userJid] -= precio;
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // --- ENVÍO PRIVADO SEGURO ---
+                // --- ENVÍO PRIVADO FORZADO Y VERIFICADO ---
                 try {
-                    await sock.sendMessage(userJid, { 
+                    const [result] = await sock.onWhatsApp(cleanNum);
+                    const targetJid = result?.exists ? result.jid : userJid;
+
+                    await sock.sendMessage(targetJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
                 } catch (e) {
-                    console.log("Error enviando al privado:", e);
+                    console.log("Error al enviar al privado:", e);
                 }
 
                 // Aviso limpio en el grupo
@@ -198,7 +200,7 @@ async function startBot() {
                     text: `✅ Compra de *${producto.toUpperCase()}* procesada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
                 });
             }
-            else if (command === 'addsaldo' && await isAdmin()) {
+            else if (command === 'addsaldo' && isAdmin()) {
                 let targetJid = userJid;
                 const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
                 if (mentioned) {
@@ -212,7 +214,7 @@ async function startBot() {
                     await sock.sendMessage(from, { text: `✅ $${monto} agregados correctamente al saldo del usuario.` });
                 }
             }
-            else if (command === 'addstock' && await isAdmin()) {
+            else if (command === 'addstock' && isAdmin()) {
                 const producto = args[0]?.toLowerCase();
                 const cuenta = args.slice(1).join(' ');
                 if (producto && cuenta) {
@@ -222,7 +224,7 @@ async function startBot() {
                     await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto}*. Total: ${db.stock[producto].length}` });
                 }
             }
-            else if (command === 'setprecio' && await isAdmin()) {
+            else if (command === 'setprecio' && isAdmin()) {
                 const producto = args[0]?.toLowerCase();
                 const precio = parseInt(args[1]);
                 if (producto && !isNaN(precio)) {

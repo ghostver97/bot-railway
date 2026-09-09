@@ -42,13 +42,16 @@ app.get('/', (req, res) => {
         res.send(`
             <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
                 <h2>Bot Tienda Samantha Online 24/7 🚀</h2>
-                <p>El bot ya está <b>conectado</b> o se está generando el código QR... (Recarga en unos segundos)</p>
+                <p>El bot ya está <b>conectado</b> y operando en la nube 24/7.</p>
             </div>
         `);
     }
 });
 
-app.listen(PORT, () => console.log(`Servidor web activo en el puerto ${PORT}`));
+// Mantiene el puerto vivo obligatoriamente para que Railway no apague el contenedor
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor HTTP corriendo y escuchando en el puerto ${PORT}`);
+});
 
 if (!fs.existsSync('./datos')) {
     fs.mkdirSync('./datos');
@@ -78,7 +81,7 @@ async function startBot() {
 
     const sock = makeWASocket({
         version,
-        logger: pino({ level: 'info' }), 
+        logger: pino({ level: 'silent' }), // Silencia logs innecesarios para evitar saturar memoria
         auth: state,
         printQRInTerminal: true
     });
@@ -99,13 +102,11 @@ async function startBot() {
             
             if (shouldReconnect) {
                 console.log('⚠️ Conexión cerrada. Intentando reconectar en 3 segundos...');
-                setTimeout(() => {
-                    startBot();
-                }, 3000);
+                setTimeout(() => startBot(), 3000);
             } else {
                 console.log('❌ Sesión cerrada permanentemente. Borrando sesión...');
                 qrImage = '';
-                fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true });
+                try { fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true }); } catch(e){}
                 setTimeout(() => startBot(), 3000);
             }
         } else if (connection === 'open') {
@@ -173,7 +174,7 @@ async function startBot() {
             const cuentaEntregada = db.stock[producto].shift();
             saveDB(db);
 
-            // Limpieza estricta de ID para que nunca falle el envío privado
+            // Limpieza estricta de ID para que nunca falle el envío privado (evita error 463)
             const rawNumber = sender.split('@')[0];
             const targetJid = rawNumber + '@s.whatsapp.net';
 

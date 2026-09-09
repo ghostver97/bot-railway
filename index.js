@@ -127,17 +127,9 @@ async function startBot() {
             const from = m.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
             
-            // Obtención exacta del remitente para chat privado
-            let senderJid = from;
-            if (isGroup) {
-                const participant = m.key.participant || m.participant;
-                if (participant && participant.includes('@s.whatsapp.net')) {
-                    senderJid = participant;
-                } else if (participant) {
-                    const cleanNum = participant.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
-                    senderJid = `${cleanNum}@s.whatsapp.net`;
-                }
-            }
+            // Identificación limpia y directa del usuario
+            const sender = isGroup ? (m.key.participant || m.participant || from) : from;
+            const userJid = sender.includes('@') ? sender : `${sender}@s.whatsapp.net`;
 
             const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
             if (!body.startsWith('.')) return;
@@ -150,7 +142,7 @@ async function startBot() {
                 if (!isGroup) return false;
                 try {
                     const metadata = await sock.groupMetadata(from);
-                    const p = metadata.participants.find(item => item.id === senderJid || item.id.includes(senderJid.split('@')[0]));
+                    const p = metadata.participants.find(item => item.id === userJid);
                     return p && (p.admin === 'admin' || p.admin === 'superadmin');
                 } catch (e) {
                     return false;
@@ -158,7 +150,7 @@ async function startBot() {
             }
 
             if (command === 'menu' || command === 'tienda') {
-                let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[senderJid] || 0} MXN\n\n📦 *Productos:*\n`;
+                let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[userJid] || 0} MXN\n\n📦 *Productos:*\n`;
                 const productos = Object.keys(db.precios);
                 if (productos.length === 0) {
                     text += `_No hay productos registrados._\n`;
@@ -170,8 +162,7 @@ async function startBot() {
                 await sock.sendMessage(from, { text });
             }
             else if (command === 'saldo') {
-                const saldoUser = db.saldos[senderJid] || 0;
-                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${saldoUser} MXN*` });
+                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[userJid] || 0} MXN*` });
             }
             else if (command === 'stock') {
                 let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
@@ -183,35 +174,35 @@ async function startBot() {
                 if (!producto || !db.precios[producto]) return sock.sendMessage(from, { text: `❌ Producto no válido.` });
                 const precio = db.precios[producto];
                 
-                const userSaldo = db.saldos[senderJid] || 0;
+                const userSaldo = db.saldos[userJid] || 0;
                 if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` });
                 if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` });
                 
-                db.saldos[senderJid] -= precio;
+                db.saldos[userJid] -= precio;
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // --- ENVÍO EXCLUSIVO AL PRIVADO DEL USUARIO ---
+                // --- ENVÍO PRIVADO SEGURO ---
                 try {
-                    await sock.sendMessage(senderJid, { 
+                    await sock.sendMessage(userJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
                 } catch (e) {
                     console.log("Error enviando al privado:", e);
                 }
 
-                // --- AVISO EN EL GRUPO (Sin credenciales) ---
+                // Aviso en el grupo
                 await sock.sendMessage(from, { 
                     text: `✅ Compra de *${producto.toUpperCase()}* procesada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
                 });
             }
             else if (command === 'addsaldo' && await isAdmin()) {
-                const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || senderJid;
+                const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || userJid;
                 const monto = parseInt(args[1] || args[0]);
                 if (!isNaN(monto)) {
                     db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
                     saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ $${monto} agregados correctamente al usuario.` });
+                    await sock.sendMessage(from, { text: `✅ $${monto} agregados correctamente.` });
                 }
             }
             else if (command === 'addstock' && await isAdmin()) {
@@ -243,10 +234,10 @@ async function startBot() {
 
 startBot();
 
-// Auto-ping para mantener activo el puerto en Railway
+// Auto-ping rápido para mantener el contenedor despierto
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
-}, 30000);
+}, 20000);
 
 process.on('uncaughtException', (err) => {});
 process.on('unhandledRejection', (err) => {});

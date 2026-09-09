@@ -48,7 +48,6 @@ app.get('/', (req, res) => {
     }
 });
 
-// Mantiene el puerto vivo obligatoriamente para que Railway no apague el contenedor
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor HTTP corriendo y escuchando en el puerto ${PORT}`);
 });
@@ -76,141 +75,154 @@ function saveDB(data) {
 }
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('./datos/auth_info_baileys');
-    const { version } = await fetchLatestBaileysVersion();
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState('./datos/auth_info_baileys');
+        const { version } = await fetchLatestBaileysVersion();
 
-    const sock = makeWASocket({
-        version,
-        logger: pino({ level: 'silent' }), // Silencia logs innecesarios para evitar saturar memoria
-        auth: state,
-        printQRInTerminal: true
-    });
+        const sock = makeWASocket({
+            version,
+            logger: pino({ level: 'silent' }),
+            auth: state,
+            printQRInTerminal: false
+        });
 
-    sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
-            qrImage = await QRCode.toDataURL(qr);
-            console.log('⚡ Nuevo QR generado. Disponible en la ruta Web.');
-        }
-
-        if (connection === 'close') {
-            const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            
-            if (shouldReconnect) {
-                console.log('⚠️ Conexión cerrada. Intentando reconectar en 3 segundos...');
-                setTimeout(() => startBot(), 3000);
-            } else {
-                console.log('❌ Sesión cerrada permanentemente. Borrando sesión...');
-                qrImage = '';
-                try { fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true }); } catch(e){}
-                setTimeout(() => startBot(), 3000);
+            if (qr) {
+                qrImage = await QRCode.toDataURL(qr);
+                console.log('⚡ Nuevo QR generado. Disponible en la ruta Web.');
             }
-        } else if (connection === 'open') {
-            qrImage = ''; 
-            console.log('✅ Bot conectado exitosamente a WhatsApp.');
-        }
-    });
 
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
-        const m = messages[0];
-        if (!m.message || m.key.fromMe) return;
-
-        const from = m.key.remoteJid;
-        const isGroup = from.endsWith('@g.us');
-        const sender = isGroup ? m.key.participant : from;
-
-        const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
-        if (!body.startsWith('.')) return;
-
-        const args = body.slice(1).trim().split(/ +/);
-        const command = args.shift().toLowerCase();
-        const db = loadDB();
-
-        async function isAdmin() {
-            if (!isGroup) return false;
-            try {
-                const metadata = await sock.groupMetadata(from);
-                const participant = metadata.participants.find(p => p.id === sender);
-                return participant && (participant.admin === 'admin' || participant.admin === 'superadmin');
-            } catch (e) {
-                return false;
+            if (connection === 'close') {
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                
+                if (shouldReconnect) {
+                    console.log('⚠️ Conexión cerrada. Intentando reconectar en 3 segundos...');
+                    setTimeout(() => startBot(), 3000);
+                } else {
+                    console.log('❌ Sesión cerrada permanentemente. Borrando sesión...');
+                    qrImage = '';
+                    try { fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true }); } catch(e){}
+                    setTimeout(() => startBot(), 3000);
+                }
+            } else if (connection === 'open') {
+                qrImage = ''; 
+                console.log('✅ Bot conectado exitosamente a WhatsApp.');
             }
-        }
+        });
 
-        if (command === 'menu' || command === 'tienda') {
-            let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[sender] || 0} MXN\n\n📦 *Productos:*\n`;
-            const productos = Object.keys(db.precios);
-            if (productos.length === 0) {
-                text += `_No hay productos registrados._\n`;
-            } else {
-                productos.forEach(p => {
-                    text += `• *${p.toUpperCase()}* - $${db.precios[p]} MXN (Stock: ${(db.stock[p] || []).length})\n`;
-                });
+        sock.ev.on('messages.upsert', async ({ messages, type }) => {
+            if (type !== 'notify') return;
+            const m = messages[0];
+            if (!m.message || m.key.fromMe) return;
+
+            const from = m.key.remoteJid;
+            const isGroup = from.endsWith('@g.us');
+            const sender = isGroup ? m.key.participant : from;
+
+            const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
+            if (!body.startsWith('.')) return;
+
+            const args = body.slice(1).trim().split(/ +/);
+            const command = args.shift().toLowerCase();
+            const db = loadDB();
+
+            async function isAdmin() {
+                if (!isGroup) return false;
+                try {
+                    const metadata = await sock.groupMetadata(from);
+                    const participant = metadata.participants.find(p => p.id === sender);
+                    return participant && (participant.admin === 'admin' || participant.admin === 'superadmin');
+                } catch (e) {
+                    return false;
+                }
             }
-            await sock.sendMessage(from, { text }, { quoted: m });
-        }
-        else if (command === 'saldo') {
-            await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[sender] || 0} MXN*` }, { quoted: m });
-        }
-        else if (command === 'stock') {
-            let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
-            for (const p in db.precios) text += `• *${p.toUpperCase()}*: ${(db.stock[p] || []).length} disponibles\n`;
-            await sock.sendMessage(from, { text }, { quoted: m });
-        }
-        else if (command === 'comprar') {
-            const producto = args[0]?.toLowerCase();
-            if (!producto || !db.precios[producto]) return sock.sendMessage(from, { text: `❌ Producto no válido.` }, { quoted: m });
-            const precio = db.precios[producto];
-            const userSaldo = db.saldos[sender] || 0;
-            if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` }, { quoted: m });
-            if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` }, { quoted: m });
-            
-            db.saldos[sender] -= precio;
-            const cuentaEntregada = db.stock[producto].shift();
-            saveDB(db);
 
-            // Limpieza estricta de ID para que nunca falle el envío privado (evita error 463)
-            const rawNumber = sender.split('@')[0];
-            const targetJid = rawNumber + '@s.whatsapp.net';
-
-            await sock.sendMessage(targetJid, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
-            
-            await sock.sendMessage(from, { text: `✅ Compra realizada. Te enviamos las credenciales por privado.` }, { quoted: m });
-        }
-        else if (command === 'addsaldo' && await isAdmin()) {
-            const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-            const monto = parseInt(args[1] || args[0]);
-            if (mentioned && !isNaN(monto)) {
-                db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
+            if (command === 'menu' || command === 'tienda') {
+                let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[sender] || 0} MXN\n\n📦 *Productos:*\n`;
+                const productos = Object.keys(db.precios);
+                if (productos.length === 0) {
+                    text += `_No hay productos registrados._\n`;
+                } else {
+                    productos.forEach(p => {
+                        text += `• *${p.toUpperCase()}* - $${db.precios[p]} MXN (Stock: ${(db.stock[p] || []).length})\n`;
+                    });
+                }
+                await sock.sendMessage(from, { text }, { quoted: m });
+            }
+            else if (command === 'saldo') {
+                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[sender] || 0} MXN*` }, { quoted: m });
+            }
+            else if (command === 'stock') {
+                let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
+                for (const p in db.precios) text += `• *${p.toUpperCase()}*: ${(db.stock[p] || []).length} disponibles\n`;
+                await sock.sendMessage(from, { text }, { quoted: m });
+            }
+            else if (command === 'comprar') {
+                const producto = args[0]?.toLowerCase();
+                if (!producto || !db.precios[producto]) return sock.sendMessage(from, { text: `❌ Producto no válido.` }, { quoted: m });
+                const precio = db.precios[producto];
+                const userSaldo = db.saldos[sender] || 0;
+                if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` }, { quoted: m });
+                if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` }, { quoted: m });
+                
+                db.saldos[sender] -= precio;
+                const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
-                await sock.sendMessage(from, { text: `✅ $${monto} agregados a @${mentioned.split('@')[0]}`, mentions: [mentioned] }, { quoted: m });
+
+                const rawNumber = sender.split('@')[0];
+                const targetJid = rawNumber + '@s.whatsapp.net';
+
+                await sock.sendMessage(targetJid, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
+                
+                await sock.sendMessage(from, { text: `✅ Compra realizada. Te enviamos las credenciales por privado.` }, { quoted: m });
             }
-        }
-        else if (command === 'addstock' && await isAdmin()) {
-            const producto = args[0]?.toLowerCase();
-            const cuenta = args.slice(1).join(' ');
-            if (producto && cuenta) {
-                if (!db.stock[producto]) db.stock[producto] = [];
-                db.stock[producto].push(cuenta);
-                saveDB(db);
-                await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto}*. Total: ${db.stock[producto].length}` }, { quoted: m });
+            else if (command === 'addsaldo' && await isAdmin()) {
+                const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                const monto = parseInt(args[1] || args[0]);
+                if (mentioned && !isNaN(monto)) {
+                    db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
+                    saveDB(db);
+                    await sock.sendMessage(from, { text: `✅ $${monto} agregados a @${mentioned.split('@')[0]}`, mentions: [mentioned] }, { quoted: m });
+                }
             }
-        }
-        else if (command === 'setprecio' && await isAdmin()) {
-            const producto = args[0]?.toLowerCase();
-            const precio = parseInt(args[1]);
-            if (producto && !isNaN(precio)) {
-                db.precios[producto] = precio;
-                if (!db.stock[producto]) db.stock[producto] = [];
-                saveDB(db);
-                await sock.sendMessage(from, { text: `✅ Precio de *${producto}* ajustado a *$${precio} MXN*.` }, { quoted: m });
+            else if (command === 'addstock' && await isAdmin()) {
+                const producto = args[0]?.toLowerCase();
+                const cuenta = args.slice(1).join(' ');
+                if (producto && cuenta) {
+                    if (!db.stock[producto]) db.stock[producto] = [];
+                    db.stock[producto].push(cuenta);
+                    saveDB(db);
+                    await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto}*. Total: ${db.stock[producto].length}` }, { quoted: m });
+                }
             }
-        }
-    });
+            else if (command === 'setprecio' && await isAdmin()) {
+                const producto = args[0]?.toLowerCase();
+                const precio = parseInt(args[1]);
+                if (producto && !isNaN(precio)) {
+                    db.precios[producto] = precio;
+                    if (!db.stock[producto]) db.stock[producto] = [];
+                    saveDB(db);
+                    await sock.sendMessage(from, { text: `✅ Precio de *${producto}* ajustado a *$${precio} MXN*.` }, { quoted: m });
+                }
+            }
+        });
+    } catch (error) {
+        console.log('Error en el bot, reiniciando en 5 segundos...', error);
+        setTimeout(() => startBot(), 5000);
+    }
 }
+
 startBot();
+
+// Mantiene el proceso vivo ante cualquier imprevisto de Node.js
+process.on('uncaughtException', (err) => {
+    console.error('Error no controlado:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Promesa rechazada no controlada:', reason);
+});

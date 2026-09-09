@@ -15,14 +15,14 @@ const QRCode = require("qrcode");
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
 
-// En Railway crea un Volume montado en /app/datos.
-// Si no existe DATA_DIR, usa ./datos.
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "datos");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 const MENU_IMAGE = path.join(process.cwd(), "menu.jpg");
 const AUTH_DIR = path.join(DATA_DIR, "auth_info_baileys");
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
+try {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+} catch (e) {}
 
 let qrImage = "";
 let sock = null;
@@ -59,15 +59,16 @@ function loadDB() {
     };
     return db;
   } catch (e) {
-    console.error("❌ Error leyendo DB:", e);
     return defaultDB();
   }
 }
 
 function saveDB(db) {
-  const temp = `${DB_FILE}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(db, null, 2), "utf8");
-  fs.renameSync(temp, DB_FILE);
+  try {
+    const temp = `${DB_FILE}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(db, null, 2), "utf8");
+    fs.renameSync(temp, DB_FILE);
+  } catch (e) {}
 }
 
 function normalizeNumber(value) {
@@ -121,7 +122,6 @@ async function isGroupAdmin(groupJid, number) {
     return !!participant &&
       (participant.admin === "admin" || participant.admin === "superadmin");
   } catch (e) {
-    console.error("❌ No se pudo comprobar admin del grupo:", e);
     return false;
   }
 }
@@ -203,8 +203,6 @@ async function handleCommand(m) {
   const args = parts;
   const db = loadDB();
 
-  console.log(`📩 .${command} de ${sender.number} ${sender.isGroup ? "(grupo)" : "(privado)"}`);
-
   if (command === "menu" || command === "tienda") {
     const text = menuText(db, sender);
 
@@ -279,8 +277,6 @@ async function handleCommand(m) {
 
     const account = stock[0];
 
-    // Primero intentamos entregar por privado.
-    // Si WhatsApp rechaza el envío, NO se descuenta el saldo ni se elimina el stock.
     try {
       await sendText(
         sender.jid,
@@ -297,7 +293,6 @@ ${account}
 Gracias por tu compra.`
       );
     } catch (deliveryError) {
-      console.error("❌ FALLÓ LA ENTREGA PRIVADA:", deliveryError);
       await sendText(
         sender.remote,
         "⚠️ La compra no pudo entregarse por privado. No se descontó tu saldo. Intenta nuevamente o contacta al administrador."
@@ -305,7 +300,6 @@ Gracias por tu compra.`
       return;
     }
 
-    // Solo después de entregar correctamente se confirma la venta.
     db.saldos[sender.jid] = balance - price;
     db.stock[product].shift();
     saveDB(db);
@@ -316,12 +310,8 @@ Gracias por tu compra.`
         `✅ Compra de *${product.toUpperCase()}* realizada.\n🔐 Revisa tu chat privado.`
       );
     }
-
-    console.log(`✅ VENTA: ${sender.number} compró ${product} por $${price}`);
     return;
   }
-
-  // ----- ADMIN -----
 
   if (command === "addsaldo") {
     if (!(await canAdmin(sender))) {
@@ -471,7 +461,6 @@ Gracias por tu compra.`
           : "🔒 *GRUPO CERRADO*\nSolo los administradores pueden enviar mensajes."
       );
     } catch (e) {
-      console.error("❌ Error cambiando configuración del grupo:", e);
       await sendText(
         sender.remote,
         "❌ No pude cambiar la configuración. Asegúrate de que el bot sea administrador del grupo."
@@ -479,41 +468,6 @@ Gracias por tu compra.`
     }
     return;
   }
-
-  if (command === "admin") {
-    if (!(await canAdmin(sender))) {
-      await sendText(sender.remote, "❌ No tienes permisos de administrador.");
-      return;
-    }
-
-    await sendText(
-      sender.remote,
-`🛠️ *COMANDOS DE ADMIN*
-
-.addsaldo NUMERO CANTIDAD
-.addsaldo CANTIDAD (mencionando al usuario)
-
-.addstock netflix cuenta
-.setprecio netflix precio
-
-.addpago transferencia datos
-.addpago oxxo datos
-.delpago transferencia
-.delpago oxxo
-
-.abrir
-.cerrar
-
-.pagos
-.stock`
-    );
-    return;
-  }
-
-  await sendText(
-    sender.remote,
-    "❓ Comando no reconocido. Usa *.menu* para ver las opciones."
-  );
 }
 
 async function startBot() {
@@ -546,9 +500,7 @@ async function startBot() {
         try {
           qrImage = await QRCode.toDataURL(qr);
           console.log("📱 QR generado. Abre la URL de Railway para escanearlo.");
-        } catch (e) {
-          console.error("❌ Error generando QR:", e);
-        }
+        } catch (e) {}
       }
 
       if (connection === "open") {
@@ -565,9 +517,7 @@ async function startBot() {
 
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
-        console.log(
-          `⚠️ WhatsApp desconectado. Código: ${statusCode}. Reconectar: ${shouldReconnect}`
-        );
+        console.log(`⚠️ WhatsApp desconectado. Código: ${statusCode}. Reconectar: ${shouldReconnect}`);
 
         sock = null;
 
@@ -575,10 +525,14 @@ async function startBot() {
           setTimeout(() => {
             starting = false;
             startBot();
-          }, 5000);
+          }, 6000);
         } else {
-          console.log("🔐 Sesión cerrada. Borra la sesión del volumen y vuelve a vincular.");
+          console.log("🔐 Sesión cerrada limpiando credenciales...");
+          try {
+            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+          } catch (err) {}
           starting = false;
+          setTimeout(startBot, 4000);
         }
       }
     });
@@ -589,36 +543,22 @@ async function startBot() {
       for (const message of messages) {
         try {
           await handleCommand(message);
-        } catch (e) {
-          console.error("❌ ERROR PROCESANDO MENSAJE:", e);
-
-          try {
-            const sender = getSender(message);
-            if (sender.remote) {
-              await sendText(
-                sender.remote,
-                "⚠️ Ocurrió un error procesando el comando. Revisa los logs de Railway."
-              );
-            }
-          } catch (_) {}
-        }
+        } catch (e) {}
       }
     });
 
   } catch (e) {
-    console.error("❌ ERROR INICIANDO BOT:", e);
     sock = null;
+    starting = false;
     setTimeout(() => {
-      starting = false;
       startBot();
-    }, 10000);
+    }, 8000);
     return;
   }
 
   starting = false;
 }
 
-// Web server para Railway y página del QR.
 app.get("/", (req, res) => {
   if (qrImage) {
     return res.send(`
@@ -659,16 +599,11 @@ app.get("/health", (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Servidor HTTP activo en puerto ${PORT}`);
-  console.log(`📁 Datos: ${DATA_DIR}`);
-  console.log(`👑 Administradores configurados: ${getAdminNumbers().length}`);
+  // Retraso de 3 segundos para que el servidor Express asiente antes de abrir el socket de WhatsApp
+  setTimeout(() => {
+    startBot();
+  }, 3000);
 });
 
-startBot();
-
-process.on("uncaughtException", (err) => {
-  console.error("💥 uncaughtException:", err);
-});
-
-process.on("unhandledRejection", (err) => {
-  console.error("💥 unhandledRejection:", err);
-});
+process.on("uncaughtException", () => {});
+process.on("unhandledRejection", () => {});

@@ -8,7 +8,6 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const pino = require("pino");
-const QRCode = require("qrcode");
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
@@ -21,7 +20,6 @@ try {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 } catch (e) {}
 
-let qrDataURL = "";
 let sock = null;
 
 function loadDB() {
@@ -68,38 +66,28 @@ async function startBot() {
     sock = makeWASocket({
       logger: pino({ level: "silent" }),
       auth: state,
-      printQRInTerminal: false,
-      markOnlineOnConnect: false,
-      browser: ['Ubuntu', 'Chrome', '20.0.0']
+      printQRInTerminal: true,
+      markOnlineOnConnect: false
     });
 
     sock.ev.on("creds.update", saveCreds);
 
     sock.ev.on("connection.update", async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        qrDataURL = await QRCode.toDataURL(qr);
-        console.log("📱 QR generado y listo en la web.");
-      }
+      const { connection, lastDisconnect } = update;
 
       if (connection === "open") {
-        qrDataURL = "";
-        console.log("✅ ¡Conectado a WhatsApp exitosamente!");
+        console.log("✅ Conectado a WhatsApp correctamente.");
       }
 
       if (connection === "close") {
-        qrDataURL = "";
         sock = null;
         const code = lastDisconnect?.error?.output?.statusCode;
-        console.log(`⚠️ Conexión cerrada. Código: ${code}`);
+        console.log(`⚠️ Desconectado. Código: ${code}`);
 
         if (code === DisconnectReason.loggedOut) {
-          try {
-            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-          } catch (e) {}
+          try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) {}
         }
-        setTimeout(startBot, 4000);
+        setTimeout(startBot, 5000);
       }
     });
 
@@ -151,13 +139,13 @@ async function startBot() {
               continue;
             }
             if (userBal < price) {
-              await sock.sendMessage(sender.remote, { text: `❌ Saldo insuficiente ($${userBal} / Requerido: $${price})` });
+              await sock.sendMessage(sender.remote, { text: `❌ Saldo insuficiente.` });
               continue;
             }
 
             const credential = stockList[0];
-            await sock.sendMessage(sender.jid, { text: `🎉 *COMPRA EXITOSA*\n📦 ${prod.toUpperCase()}\n🔐 Datos:\n${credential}` });
-            
+            await sock.sendMessage(sender.jid, { text: `🎉 *COMPRA EXITOSA*\n\n📦 ${prod.toUpperCase()}\n🔐 Datos:\n${credential}` });
+
             db.saldos[sender.jid] = userBal - price;
             db.stock[prod].shift();
             saveDB(db);
@@ -173,7 +161,7 @@ async function startBot() {
             const jid = `${target}@s.whatsapp.net`;
             db.saldos[jid] = Number(db.saldos[jid] || 0) + amount;
             saveDB(db);
-            await sock.sendMessage(sender.remote, { text: `✅ Saldo agregado: +$${amount}` });
+            await sock.sendMessage(sender.remote, { text: `✅ Saldo agregado.` });
             continue;
           }
 
@@ -209,31 +197,7 @@ async function startBot() {
 }
 
 app.get("/", (req, res) => {
-  if (qrDataURL) {
-    return res.send(`
-      <!doctype html>
-      <html lang="es">
-      <head>
-        <meta charset="utf-8">
-        <title>QR Bot</title>
-        <meta http-equiv="refresh" content="4">
-        <style>
-          body{font-family:Arial;background:#111;color:#fff;text-align:center;padding:50px}
-          .card{max-width:400px;margin:auto;background:#222;padding:30px;border-radius:12px}
-          img{background:#fff;padding:10px;border-radius:8px;max-width:100%}
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h2>📱 Escanea el QR</h2>
-          <img src="${qrDataURL}" alt="QR">
-          <p style="color:#aaa;font-size:12px">Se actualiza solo</p>
-        </div>
-      </body>
-      </html>
-    `);
-  }
-  res.send("<h2>✅ Bot en línea y conectado a WhatsApp.</h2>");
+  res.send("<h2>✅ Bot activo. Revisa los Deploy Logs de Railway para escanear el QR.</h2>");
 });
 
 app.get("/health", (req, res) => {

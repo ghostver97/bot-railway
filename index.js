@@ -14,7 +14,6 @@ let qrImage = '';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Ruta principal optimizada para que Railway detecte vida activa 24/7
 app.get('/', (req, res) => {
     if (qrImage) {
         res.send(`
@@ -44,7 +43,6 @@ app.get('/', (req, res) => {
     }
 });
 
-// Ruta de salud obligatoria para Railway
 app.get('/health', (req, res) => {
     res.status(200).send('Healthy');
 });
@@ -123,7 +121,11 @@ async function startBot() {
 
             const from = m.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
-            const sender = isGroup ? m.key.participant : from;
+            
+            // Extracción segura del número real del usuario sin importar si escribe en grupo o privado
+            const rawSender = isGroup ? m.key.participant : from;
+            const cleanNumber = rawSender ? rawSender.split('@')[0].replace(/[^0-9]/g, '') : '';
+            const targetJid = `${cleanNumber}@s.whatsapp.net`;
 
             const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
             if (!body.startsWith('.')) return;
@@ -136,7 +138,7 @@ async function startBot() {
                 if (!isGroup) return false;
                 try {
                     const metadata = await sock.groupMetadata(from);
-                    const participant = metadata.participants.find(p => p.id === sender);
+                    const participant = metadata.participants.find(p => p.id === rawSender);
                     return participant && (participant.admin === 'admin' || participant.admin === 'superadmin');
                 } catch (e) {
                     return false;
@@ -144,7 +146,7 @@ async function startBot() {
             }
 
             if (command === 'menu' || command === 'tienda') {
-                let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[sender] || 0} MXN\n\n📦 *Productos:*\n`;
+                let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[rawSender] || 0} MXN\n\n📦 *Productos:*\n`;
                 const productos = Object.keys(db.precios);
                 if (productos.length === 0) {
                     text += `_No hay productos registrados._\n`;
@@ -156,7 +158,7 @@ async function startBot() {
                 await sock.sendMessage(from, { text }, { quoted: m });
             }
             else if (command === 'saldo') {
-                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[sender] || 0} MXN*` }, { quoted: m });
+                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[rawSender] || 0} MXN*` }, { quoted: m });
             }
             else if (command === 'stock') {
                 let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
@@ -167,18 +169,20 @@ async function startBot() {
                 const producto = args[0]?.toLowerCase();
                 if (!producto || !db.precios[producto]) return sock.sendMessage(from, { text: `❌ Producto no válido.` }, { quoted: m });
                 const precio = db.precios[producto];
-                const userSaldo = db.saldos[sender] || 0;
+                const userSaldo = db.saldos[rawSender] || 0;
                 if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` }, { quoted: m });
                 if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` }, { quoted: m });
                 
-                db.saldos[sender] -= precio;
+                db.saldos[rawSender] -= precio;
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                const rawNumber = sender.split('@')[0];
-                const targetJid = rawNumber + '@s.whatsapp.net';
-
-                await sock.sendMessage(targetJid, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
+                // Envío directo garantizado al chat privado del comprador
+                try {
+                    await sock.sendMessage(targetJid, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
+                } catch (err) {
+                    console.log("Error enviando mensaje privado:", err);
+                }
                 
                 await sock.sendMessage(from, { text: `✅ Compra realizada. Te enviamos las credenciales por privado.` }, { quoted: m });
             }

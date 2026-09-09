@@ -170,20 +170,20 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Limpieza del número para enviar al privado del cliente
+                // Destino privado garantizado (convierte el participante del grupo en chat directo 100% privado)
                 const cleanNumber = sender.split('@')[0].replace(/[^0-9]/g, '');
                 const targetJid = `${cleanNumber}@s.whatsapp.net`;
 
-                // 1. Envía las credenciales por PRIVADO al cliente
+                // 1. Envía las credenciales EXCLUSIVAMENTE AL PRIVADO del cliente
                 try {
                     await sock.sendMessage(targetJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
                 } catch (e) {
-                    console.log("No se pudo enviar al privado:", e);
+                    console.log("Error enviando al privado:", e);
                 }
 
-                // 2. Confirma en el chat (grupo o privado) que la compra fue procesada
+                // 2. Confirma únicamente en el chat de origen (grupo) que ya se despachó
                 await sock.sendMessage(from, { 
                     text: `✅ Compra realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
                 });
@@ -226,10 +226,10 @@ async function startBot() {
 
 startBot();
 
-// --- AUTO-PING PARA EVITAR QUE RAILWAY APAGUE EL CONTENEDOR ---
+// --- AUTO-PING CORREGIDO CON 127.0.0.1 PARA EVITAR CAÍDAS EN RAILWAY ---
 setInterval(() => {
-    http.get(`http://localhost:${PORT}/`, (res) => {}).on('error', (err) => {});
-}, 180000);
+    http.get(`http://127.0.0.1:${PORT}/`, (res) => {}).on('error', (err) => {});
+}, 120000); // Cada 2 minutos
 
 process.on('uncaughtException', () => {});
 process.on('unhandledRejection', () => {});

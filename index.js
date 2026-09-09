@@ -11,6 +11,7 @@ const QRCode = require('qrcode');
 const http = require('http');
 
 let qrImage = '';
+let activeSock = null;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,8 +48,8 @@ app.get('/health', (req, res) => {
     res.status(200).send('Healthy');
 });
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor HTTP activo y respondiendo en el puerto ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor HTTP activo en el puerto ${PORT}`);
 });
 
 if (!fs.existsSync('./datos')) {
@@ -75,6 +76,11 @@ function saveDB(data) {
 
 async function startBot() {
     try {
+        if (activeSock) {
+            try { activeSock.end(); } catch(e) {}
+            activeSock = null;
+        }
+
         const { state, saveCreds } = await useMultiFileAuthState('./datos/auth_info_baileys');
         const { version } = await fetchLatestBaileysVersion();
 
@@ -85,6 +91,7 @@ async function startBot() {
             printQRInTerminal: false
         });
 
+        activeSock = sock;
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('connection.update', async (update) => {
@@ -95,13 +102,16 @@ async function startBot() {
             }
 
             if (connection === 'close') {
-                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
                 console.log('⚠️ Conexión cerrada. Reconectando:', shouldReconnect);
+                
                 if (shouldReconnect) {
-                    setTimeout(() => startBot(), 3000);
+                    setTimeout(() => startBot(), 4000);
                 } else {
+                    qrImage = '';
                     try { fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true }); } catch(e){}
-                    setTimeout(() => startBot(), 3000);
+                    setTimeout(() => startBot(), 4000);
                 }
             } else if (connection === 'open') {
                 qrImage = ''; 
@@ -168,11 +178,11 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // EXTRACCIÓN ESTRICTA DE JID PRIVADO: Forzamos el número puro del remitente
+                // Extracción segura del número real para chat privado
                 const userNumber = sender.split('@')[0].split(':')[0];
                 const privateJid = `${userNumber}@s.whatsapp.net`;
 
-                // 1. Envío DIRECTO e INQUEBRANTABLE al chat privado del usuario
+                // 1. Envío exclusivo al chat privado del usuario
                 try {
                     await sock.sendMessage(privateJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
@@ -181,9 +191,9 @@ async function startBot() {
                     console.log("Error enviando al privado:", e);
                 }
 
-                // 2. Notificación limpia en el grupo (sin mostrar datos sensibles)
+                // 2. Aviso limpio en el grupo
                 await sock.sendMessage(from, { 
-                    text: `✅ Compra de *${producto.toUpperCase()}* procesada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
+                    text: `✅ Compra de *${producto.toUpperCase()}* realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
                 });
             }
             else if (command === 'addsaldo' && await isAdmin()) {
@@ -217,17 +227,17 @@ async function startBot() {
             }
         });
     } catch (error) {
-        console.log("Error en el bot, reintentando...", error);
+        console.log("Error crítico en el bot:", error);
         setTimeout(() => startBot(), 5000);
     }
 }
 
 startBot();
 
-// --- AUTO-PING CADA 30 SEGUNDOS PARA EVITAR QUE RAILWAY APAGUE EL CONTENEDOR ---
+// Auto-ping de mantenimiento para mantener el contenedor despierto
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
 }, 30000);
 
-process.on('uncaughtException', () => {});
-process.on('unhandledRejection', () => {});
+process.on('uncaughtException', (err) => { console.log('Excepción atrapada:', err); });
+process.on('unhandledRejection', (err) => { console.log('Promesa rechazada:', err); });

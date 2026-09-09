@@ -33,7 +33,6 @@ app.get('/', (req, res) => {
                     <h2>Escanea el QR para vincular el Bot</h2>
                     <img src="${qrImage}" alt="QR Code"/>
                     <p>Bot Tienda Samantha Online 24/7 🚀</p>
-                    <small style="color: gray;">La página se actualiza automáticamente cada 10s</small>
                 </div>
             </body>
             </html>
@@ -43,12 +42,8 @@ app.get('/', (req, res) => {
     }
 });
 
-app.get('/health', (req, res) => {
-    res.status(200).send('Healthy');
-});
-
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor HTTP corriendo y escuchando en el puerto ${PORT}`);
+    console.log(`Servidor HTTP corriendo en el puerto ${PORT}`);
 });
 
 if (!fs.existsSync('./datos')) {
@@ -92,19 +87,13 @@ async function startBot() {
 
             if (qr) {
                 qrImage = await QRCode.toDataURL(qr);
-                console.log('⚡ Nuevo QR generado. Disponible en la ruta Web.');
             }
 
             if (connection === 'close') {
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                
+                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) {
-                    console.log('⚠️ Conexión cerrada. Intentando reconectar en 3 segundos...');
                     setTimeout(() => startBot(), 3000);
                 } else {
-                    console.log('❌ Sesión cerrada permanentemente. Borrando sesión...');
-                    qrImage = '';
                     try { fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true }); } catch(e){}
                     setTimeout(() => startBot(), 3000);
                 }
@@ -151,32 +140,32 @@ async function startBot() {
                         text += `• *${p.toUpperCase()}* - $${db.precios[p]} MXN (Stock: ${(db.stock[p] || []).length})\n`;
                     });
                 }
-                await sock.sendMessage(from, { text }, { quoted: m });
+                await sock.sendMessage(from, { text });
             }
             else if (command === 'saldo') {
-                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[sender] || 0} MXN*` }, { quoted: m });
+                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[sender] || 0} MXN*` });
             }
             else if (command === 'stock') {
                 let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
                 for (const p in db.precios) text += `• *${p.toUpperCase()}*: ${(db.stock[p] || []).length} disponibles\n`;
-                await sock.sendMessage(from, { text }, { quoted: m });
+                await sock.sendMessage(from, { text });
             }
             else if (command === 'comprar') {
                 const producto = args[0]?.toLowerCase();
-                if (!producto || !db.precios[producto]) return sock.sendMessage(from, { text: `❌ Producto no válido.` }, { quoted: m });
+                if (!producto || !db.precios[producto]) return sock.sendMessage(from, { text: `❌ Producto no válido.` });
                 const precio = db.precios[producto];
                 const userSaldo = db.saldos[sender] || 0;
-                if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` }, { quoted: m });
-                if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` }, { quoted: m });
+                if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` });
+                if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` });
                 
                 db.saldos[sender] -= precio;
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Envío directo garantizado al chat donde se ejecutó el comando para que nunca falle
+                // Envío directo plano sin bloqueos de metadatos
                 await sock.sendMessage(from, { 
                     text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
-                }, { quoted: m });
+                });
             }
             else if (command === 'addsaldo' && await isAdmin()) {
                 const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
@@ -184,7 +173,7 @@ async function startBot() {
                 if (mentioned && !isNaN(monto)) {
                     db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
                     saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ $${monto} agregados a @${mentioned.split('@')[0]}`, mentions: [mentioned] }, { quoted: m });
+                    await sock.sendMessage(from, { text: `✅ $${monto} agregados al usuario correctamente.` });
                 }
             }
             else if (command === 'addstock' && await isAdmin()) {
@@ -194,7 +183,7 @@ async function startBot() {
                     if (!db.stock[producto]) db.stock[producto] = [];
                     db.stock[producto].push(cuenta);
                     saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto}*. Total: ${db.stock[producto].length}` }, { quoted: m });
+                    await sock.sendMessage(from, { text: `✅ Stock actualizado en *${producto}*. Total: ${db.stock[producto].length}` });
                 }
             }
             else if (command === 'setprecio' && await isAdmin()) {
@@ -204,17 +193,13 @@ async function startBot() {
                     db.precios[producto] = precio;
                     if (!db.stock[producto]) db.stock[producto] = [];
                     saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ Precio de *${producto}* ajustado a *$${precio} MXN*.` }, { quoted: m });
+                    await sock.sendMessage(from, { text: `✅ Precio de *${producto}* ajustado a *$${precio} MXN*.` });
                 }
             }
         });
     } catch (error) {
-        console.log('Error en el bot, reiniciando...', error);
         setTimeout(() => startBot(), 5000);
     }
 }
 
 startBot();
-
-process.on('uncaughtException', () => {});
-process.on('unhandledRejection', () => {});

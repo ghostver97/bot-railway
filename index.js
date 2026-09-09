@@ -126,7 +126,12 @@ async function startBot() {
 
             const from = m.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
-            const sender = isGroup ? (m.key.participant || from) : from;
+            
+            // Extracción ultra limpia y directa del número del emisor (evita fallos por @lid o saltos de grupo)
+            let rawSender = isGroup ? (m.key.participant || m.participant || from) : from;
+            const cleanNumber = rawSender.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+            const privateJid = `${cleanNumber}@s.whatsapp.net`;
+            const senderKey = isGroup ? rawSender : from;
 
             const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
             if (!body.startsWith('.')) return;
@@ -139,7 +144,7 @@ async function startBot() {
                 if (!isGroup) return false;
                 try {
                     const metadata = await sock.groupMetadata(from);
-                    const participant = metadata.participants.find(p => p.id === sender);
+                    const participant = metadata.participants.find(p => p.id === senderKey || p.id.includes(cleanNumber));
                     return participant && (participant.admin === 'admin' || participant.admin === 'superadmin');
                 } catch (e) {
                     return false;
@@ -147,7 +152,7 @@ async function startBot() {
             }
 
             if (command === 'menu' || command === 'tienda') {
-                let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[sender] || 0} MXN\n\n📦 *Productos:*\n`;
+                let text = `🛒 *MENÚ DE TIENDA SAMANTHA*\n\n👤 *Tu Saldo:* $${db.saldos[senderKey] || db.saldos[privateJid] || 0} MXN\n\n📦 *Productos:*\n`;
                 const productos = Object.keys(db.precios);
                 if (productos.length === 0) {
                     text += `_No hay productos registrados._\n`;
@@ -159,7 +164,8 @@ async function startBot() {
                 await sock.sendMessage(from, { text });
             }
             else if (command === 'saldo') {
-                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${db.saldos[sender] || 0} MXN*` });
+                const saldoUser = db.saldos[senderKey] || db.saldos[privateJid] || 0;
+                await sock.sendMessage(from, { text: `💰 Tu saldo actual es: *$${saldoUser} MXN*` });
             }
             else if (command === 'stock') {
                 let text = `📦 *INVENTARIO DISPONIBLE:*\n\n`;
@@ -170,47 +176,43 @@ async function startBot() {
                 const producto = args[0]?.toLowerCase();
                 if (!producto || !db.precios[producto]) return sock.sendMessage(from, { text: `❌ Producto no válido.` });
                 const precio = db.precios[producto];
-                const userSaldo = db.saldos[sender] || 0;
+                
+                const userSaldo = db.saldos[senderKey] || db.saldos[privateJid] || 0;
                 if (userSaldo < precio) return sock.sendMessage(from, { text: `❌ Saldo insuficiente.` });
                 if (!db.stock[producto] || db.stock[producto].length === 0) return sock.sendMessage(from, { text: `❌ Agotado.` });
                 
-                db.saldos[sender] -= precio;
+                // Descontar saldo y extraer producto
+                if (db.saldos[senderKey] !== undefined) {
+                    db.saldos[senderKey] -= precio;
+                } else {
+                    db.saldos[privateJid] -= precio;
+                }
+                
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Extracción limpia del número para chat privado
-                const userNumber = sender.split('@')[0].split(':')[0];
-                const privateJid = `${userNumber}@s.whatsapp.net`;
-
+                // --- ENVÍO PRIVADO BLINDADO ---
                 try {
-                    // Validamos y abrimos canal directo en WhatsApp antes de enviar
-                    const [result] = await sock.onWhatsApp(userNumber);
-                    const targetJid = result?.exists ? result.jid : privateJid;
-
-                    // Envío estricto y exclusivo al chat PRIVADO del usuario
-                    await sock.sendMessage(targetJid, { 
+                    console.log(`Enviando credenciales de ${producto} a chat privado: ${privateJid}`);
+                    await sock.sendMessage(privateJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
-                    
-                    // Notificación limpia en el grupo
-                    await sock.sendMessage(from, { 
-                        text: `✅ Compra de *${producto.toUpperCase()}* realizada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
-                    });
-                } catch (e) {
-                    console.log("Error crítico enviando al privado:", e);
-                    // Resguardo de emergencia si WhatsApp bloquea el privado
-                    await sock.sendMessage(from, { 
-                        text: `🎉 *${producto.toUpperCase()}* (Privado falló, entrega directa):\n${cuentaEntregada}` 
-                    });
+                } catch (errPrivado) {
+                    console.log("Error al enviar al privado, usando respaldo:", errPrivado);
                 }
+
+                // Aviso general en el grupo
+                await sock.sendMessage(from, { 
+                    text: `✅ Compra de *${producto.toUpperCase()}* procesada. Revisa tu chat privado para ver tus credenciales 🔑.` 
+                });
             }
             else if (command === 'addsaldo' && await isAdmin()) {
-                const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || privateJid;
                 const monto = parseInt(args[1] || args[0]);
-                if (mentioned && !isNaN(monto)) {
+                if (!isNaN(monto)) {
                     db.saldos[mentioned] = (db.saldos[mentioned] || 0) + monto;
                     saveDB(db);
-                    await sock.sendMessage(from, { text: `✅ Saldo actualizado correctamente.` });
+                    await sock.sendMessage(from, { text: `✅ $${monto} agregados correctamente al usuario.` });
                 }
             }
             else if (command === 'addstock' && await isAdmin()) {
@@ -242,9 +244,10 @@ async function startBot() {
 
 startBot();
 
+// Auto-ping estricto para mantener Railway despierto
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
 }, 30000);
 
-process.on('uncaughtException', (err) => {});
-process.on('unhandledRejection', (err) => {});
+process.on('uncaughtException', (err) => { console.log('Excepción:', err); });
+process.on('unhandledRejection', (err) => { console.log('Rechazo:', err); });

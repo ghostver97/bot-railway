@@ -9,6 +9,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const pino = require("pino");
+const QRCode = require("qrcode");
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
@@ -22,6 +23,7 @@ try {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 } catch (e) {}
 
+let qrImage = "";
 let sock = null;
 
 function loadDB() {
@@ -206,18 +208,26 @@ async function startBot() {
       version,
       logger: pino({ level: "silent" }),
       auth: state,
-      printQRInTerminal: true,
+      printQRInTerminal: false,
       markOnlineOnConnect: false
     });
 
     sock.ev.on("creds.update", saveCreds);
 
     sock.ev.on("connection.update", async (update) => {
-      const { connection, lastDisconnect } = update;
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        qrImage = await QRCode.toDataURL(qr);
+      }
+
       if (connection === "open") {
+        qrImage = "";
         console.log("✅ Conectado a WhatsApp correctamente.");
       }
+
       if (connection === "close") {
+        qrImage = "";
         sock = null;
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         console.log(`⚠️ Desconectado. Código: ${statusCode}`);
@@ -241,7 +251,33 @@ async function startBot() {
 }
 
 app.get("/", (req, res) => {
-  res.send("<h2>✅ Bot activo. Revisa los Deploy Logs de Railway para escanear el QR.</h2>");
+  if (qrImage) {
+    return res.send(`
+      <!doctype html>
+      <html lang="es">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Vincular Bot WhatsApp</title>
+        <meta http-equiv="refresh" content="5">
+        <style>
+          body{font-family:Arial,sans-serif;background:#111;color:#fff;text-align:center;padding:40px}
+          .card{max-width:400px;margin:auto;background:#1d1d1d;padding:30px;border-radius:15px;box-shadow:0 4px 15px rgba(0,0,0,0.5)}
+          img{max-width:100%;background:#fff;padding:10px;border-radius:10px}
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>📱 Vincular Bot</h2>
+          <p>Escanea este código QR:</p>
+          <img src="${qrImage}" alt="QR Code">
+          <p style="font-size:12px; color:#888;">La página se actualiza sola</p>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+  res.send("<h2>✅ Bot de WhatsApp activo y conectado.</h2>");
 });
 
 app.get("/health", (req, res) => {
@@ -253,5 +289,5 @@ app.listen(PORT, "0.0.0.0", () => {
   setTimeout(startBot, 3000);
 });
 
-process.on("uncaughtException", (err) => { console.error("Error:", err); });
-process.on("unhandledRejection", (err) => { console.error("Rejection:", err); });
+process.on("uncaughtException", () => {});
+process.on("unhandledRejection", () => {});

@@ -177,9 +177,9 @@ async function startBot() {
             const cuentaEntregada = db.stock[producto].shift();
             saveDB(db);
 
-            // Envío seguro al chat privado (evita error 463 de WhatsApp)
-            const cleanSender = sender.includes('@') ? sender.split('@')[0] + '@s.whatsapp.net' : sender;
-            await sock.sendMessage(cleanSender, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
+            // Envío directo forzado para evitar error 463
+            const targetJid = sender.includes('@') ? sender : `${sender}@s.whatsapp.net`;
+            await sock.sendMessage(targetJid, { text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` });
             
             await sock.sendMessage(from, { text: `✅ Compra realizada. Te enviamos las credenciales por privado.` }, { quoted: m });
         }

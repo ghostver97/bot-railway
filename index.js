@@ -127,7 +127,6 @@ async function startBot() {
             const from = m.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
             
-            // Extracción estricta del emisor
             const rawSender = isGroup ? (m.key.participant || m.participant || from) : from;
             const cleanNum = rawSender.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
             const userJid = `${cleanNum}@s.whatsapp.net`;
@@ -183,18 +182,11 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // --- ENVÍO DIRECTO AL PRIVADO SIN BLOQUEOS ---
-                try {
-                    await sock.sendMessage(userJid, { 
-                        text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
-                    });
-                } catch (e) {
-                    console.log("Error al enviar al privado:", e);
-                }
-
-                // Aviso limpio en el grupo
+                // --- ENTREGA SEGURA Y DIRECTA CON MENCIÓN EN EL GRUPO ---
+                // Al mencionarte directamente en el grupo, garantizamos que el mensaje con tus credenciales llegue al 100% sin bloqueos de privacidad
                 await sock.sendMessage(from, { 
-                    text: `✅ Compra de *${producto.toUpperCase()}* procesada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
+                    text: `🎉 *¡COMPRA EXITOSA!*\n\n👤 Comprador: @${cleanNum}\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}`,
+                    mentions: [userJid]
                 });
             }
             else if (command === 'addsaldo' && isAdmin()) {
@@ -240,7 +232,7 @@ async function startBot() {
 
 startBot();
 
-// Auto-ping rápido cada 15 segundos para asegurar que Railway nunca apague el contenedor
+// Auto-ping estricto para mantener Railway despierto
 setInterval(() => {
     http.get(`http://127.0.0.1:${PORT}/health`, (res) => {}).on('error', () => {});
 }, 15000);

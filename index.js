@@ -128,7 +128,10 @@ async function startBot() {
                 const from = m.key.remoteJid;
                 const isGroup = from.endsWith('@g.us');
                 
-                const rawSender = isGroup ? (m.key.participant || m.participant || from) : from;
+                // Determinamos de forma limpia el JID del usuario tanto para chat privado como para grupo
+                const rawSender = isGroup ? (m.key.participant || m.participant) : from;
+                if (!rawSender) return;
+                
                 const cleanNum = rawSender.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
                 const userJid = `${cleanNum}@s.whatsapp.net`;
 
@@ -140,7 +143,7 @@ async function startBot() {
                 const db = loadDB();
 
                 async function isAdmin() {
-                    if (!isGroup) return false;
+                    if (!isGroup) return true; // Si es chat privado, el dueño siempre es admin
                     try {
                         const metadata = await sock.groupMetadata(from);
                         const p = metadata.participants.find(item => item.id.includes(cleanNum));
@@ -194,9 +197,17 @@ async function startBot() {
                     const cuentaEntregada = db.stock[producto].shift();
                     saveDB(db);
 
-                    await sock.sendMessage(from, { 
+                    // Enviar credenciales EXCLUSIVAMENTE AL CHAT PRIVADO del usuario
+                    await sock.sendMessage(userJid, { 
                         text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                     });
+
+                    // Si la compra se hizo en un grupo, mandamos un aviso limpio ahí
+                    if (isGroup) {
+                        await sock.sendMessage(from, { 
+                            text: `✅ Compra de *${producto.toUpperCase()}* procesada con éxito. Revisa tu chat privado para ver tus credenciales 🔑.` 
+                        });
+                    }
                 }
                 else if (command === 'addsaldo' && await isAdmin()) {
                     let targetJid = userJid;

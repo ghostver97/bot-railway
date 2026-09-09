@@ -1,7 +1,8 @@
 {
-  "name": "bot-samantha-hacker",
-  "version": "1.0.0",
-  "description": "Bot de WhatsApp para Tienda Samantha",
+  "name": "tienda-whatsapp-railway",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Bot de tienda WhatsApp con Baileys para Railway",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -13,6 +14,6 @@
     "qrcode": "^1.5.3"
   },
   "engines": {
-    "node": ">=18.x"
+    "node": ">=18"
   }
 }

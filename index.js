@@ -4,51 +4,8 @@ const {
     DisconnectReason,
     fetchLatestBaileysVersion
 } = require('@whiskeysockets/baileys');
-const express = require('express');
 const fs = require('fs');
 const pino = require('pino');
-const QRCode = require('qrcode');
-
-let qrImage = '';
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get('/', (req, res) => {
-    if (qrImage) {
-        res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>QR Bot WhatsApp</title>
-                <meta http-equiv="refresh" content="5">
-                <style>
-                    body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; background: #f4f4f9; margin: 0; }
-                    .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); text-align: center; }
-                    img { width: 280px; height: 280px; margin: 15px 0; }
-                </style>
-            </head>
-            <body>
-                <div class="card">
-                    <h2>Escanea el QR para vincular el Bot</h2>
-                    <img src="${qrImage}" alt="QR Code"/>
-                    <p>Bot Tienda Samantha Online 24/7 🚀</p>
-                </div>
-            </body>
-            </html>
-        `);
-    } else {
-        res.status(200).send('OK - Bot Activo 24/7 y Operando');
-    }
-});
-
-// Mantener el servidor HTTP vivo a toda costa
-const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor HTTP activo en el puerto ${PORT}`);
-});
-
-server.keepAliveTimeout = 61000;
-server.headersTimeout = 65000;
 
 if (!fs.existsSync('./datos')) {
     fs.mkdirSync('./datos');
@@ -81,8 +38,7 @@ async function startBot() {
             version,
             logger: pino({ level: 'silent' }),
             auth: state,
-            printQRInTerminal: false,
-            browser: ["Ubuntu", "Chrome", "20.0.04"]
+            printQRInTerminal: true
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -90,25 +46,16 @@ async function startBot() {
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
 
-            if (qr) {
-                qrImage = await QRCode.toDataURL(qr);
-            }
-
             if (connection === 'close') {
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                
-                console.log(`⚠️ Conexión cerrada. Código: ${statusCode}. Reconectando: ${shouldReconnect}`);
-                
+                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                console.log('⚠️ Conexión cerrada. Reconectando:', shouldReconnect);
                 if (shouldReconnect) {
                     setTimeout(() => startBot(), 3000);
                 } else {
-                    qrImage = '';
                     try { fs.rmSync('./datos/auth_info_baileys', { recursive: true, force: true }); } catch(e){}
                     setTimeout(() => startBot(), 3000);
                 }
             } else if (connection === 'open') {
-                qrImage = ''; 
                 console.log('✅ Bot conectado exitosamente a WhatsApp.');
             }
         });
@@ -172,7 +119,7 @@ async function startBot() {
                 const cuentaEntregada = db.stock[producto].shift();
                 saveDB(db);
 
-                // Envío directo al chat actual (grupo o privado) para garantizar entrega inmediata
+                // Envío directo al chat actual sin bloqueos
                 await sock.sendMessage(from, { 
                     text: `🎉 *¡COMPRA EXITOSA!*\n\n📦 *Producto:* ${producto.toUpperCase()}\n🔑 *Credenciales:*\n${cuentaEntregada}` 
                 });
@@ -208,11 +155,9 @@ async function startBot() {
             }
         });
     } catch (error) {
+        console.log("Error crítico, reiniciando...", error);
         setTimeout(() => startBot(), 5000);
     }
 }
 
 startBot();
-
-process.on('uncaughtException', () => {});
-process.on('unhandledRejection', () => {});
